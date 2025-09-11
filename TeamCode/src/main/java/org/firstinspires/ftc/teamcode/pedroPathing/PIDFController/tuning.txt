@@ -1,0 +1,107 @@
+PIDF Controller Tuning Guide
+============================
+
+This guide provides a systematic approach to tuning the PIDF controllers (`LinearPIDFController`, `RotationalPIDFController`, and `VelocityPIDFController`).
+
+### Overview
+
+Tuning is an iterative process that requires patience. The goal is to find a set of gains that makes your mechanism responsive, stable, and accurate. The recommended tuning order is:
+
+1.  **Feedforward Gains (`kS`, `kV`, `kG`)** - To get the mechanism in the right ballpark of motion without feedback.
+2.  **Proportional Gain (`kP`)** - To correct errors and drive the mechanism to the target.
+3.  **Derivative Gain (`kD`)** - To dampen oscillations and reduce overshoot.
+4.  **Integral Gain (`kI`)** - To eliminate small, persistent (steady-state) errors.
+
+### Prerequisites
+
+*   **Safety:** Ensure your robot is in a safe position (e.g., on blocks) where it cannot damage itself or its surroundings.
+*   **Telemetry:** You need a way to see real-time data from the robot. Plotting position, velocity, and error over time is highly recommended. At a minimum, log these values to the console.
+*   **Start Fresh:** Set all gains (`kP`, `kI`, `kD`, `kS`, `kV`, `kG`) to zero before you begin.
+
+---
+
+### Tuning `LinearPIDFController` and `RotationalPIDFController`
+
+The process is nearly identical for both. For the rotational controller, you just have the extra `kG` step.
+
+#### Step 1: Tune `kS` (Static Friction Feedforward)
+
+*   **Purpose:** To provide the minimum power needed to overcome static friction (stiction) and start moving.
+*   **Method:**
+    1.  Disable the PID controller logic (or keep gains at zero).
+    2.  Apply a small, constant power to the motor.
+    3.  Slowly increase this power until the mechanism *just* begins to move.
+    4.  This minimum power value is your starting point for `kS`.
+
+#### Step 2: Tune `kV` (Velocity Feedforward)
+
+*   **Purpose:** To provide the power needed to maintain a constant velocity.
+*   **Method:**
+    1.  With `kS` set and other gains at zero, apply a moderate, constant power to the motor (e.g., 0.4 or 40%).
+    2.  Let the mechanism move and measure its steady-state (cruise) velocity.
+    3.  A good starting `kV` is `applied_power / steady_state_velocity`.
+    4.  *Alternative Method:* Use a motion profiling tool (if you have one) to generate a constant velocity segment. Adjust `kV` until the motor power from the controller (`kV * target_velocity`) closely matches the power needed to follow that velocity.
+
+#### Step 3: Tune `kG` (Gravity Feedforward - Rotational Only)
+
+*   **Purpose:** To counteract the force of gravity on a rotational arm.
+*   **Method:**
+    1.  Position the arm so it is perfectly horizontal (`currentAngleRad = 0`).
+    2.  With other gains at zero, apply a constant power to the arm's motor.
+    3.  Adjust the power until the arm holds its horizontal position without moving up or down.
+    4.  This power value is your `kG`.
+
+#### Step 4: Tune `kP` (Proportional Gain)
+
+*   **Purpose:** To correct the error and drive the mechanism toward the target.
+*   **Method:**
+    1.  Set your feedforward gains (`kS`, `kV`, `kG`) from the previous steps. Keep `kI` and `kD` at zero.
+    2.  Command the mechanism to move to a target position.
+    3.  Start with a small `kP` and increase it gradually.
+    4.  You are looking for a value that makes the mechanism move quickly toward the target. You will likely see some overshoot (it goes past the target and comes back).
+    5.  If the response is very slow, increase `kP`. If it oscillates violently, `kP` is too high. Settle on a value that is responsive but not wildly unstable.
+
+#### Step 5: Tune `kD` (Derivative Gain)
+
+*   **Purpose:** To dampen the system, reduce overshoot, and prevent oscillation.
+*   **Method:**
+    1.  Use the `kP` value from the previous step.
+    2.  Start with a very small `kD` and increase it.
+    3.  A good `kD` will reduce the overshoot caused by `kP` and help the mechanism settle at the target faster.
+    4.  **Warning:** Too much `kD` can make the system sluggish, noisy, or cause high-frequency vibrations.
+    5.  **Noise:** The derivative term is sensitive to noise from encoders. If your system is jittery, use the derivative filter: `controller.setDerivativeCutoffHz(low_frequency, loop_time)`. A cutoff frequency of 10-20 Hz is a good starting point.
+
+#### Step 6: Tune `kI` (Integral Gain)
+
+*   **Purpose:** To eliminate small, persistent errors (steady-state error) that `kP` and `kD` don't fix.
+*   **Method:**
+    1.  Tune `kI` last.
+    2.  With your `kP` and `kD` set, command the mechanism to a target.
+    3.  If you notice it consistently stops just short of the target, introduce a very small `kI`.
+    4.  Increase `kI` slowly until the mechanism eventually eliminates the small error and reaches the target perfectly.
+    5.  **Warning:** Too much `kI` is a common cause of problems. It leads to "integral windup," where the controller accumulates a huge integral sum, causing massive overshoot and long, slow oscillations.
+    6.  **Prevention:** Use the integral clamp to prevent windup: `controller.setIntegralLimits(-limit, limit)`. A small limit like `0.25` is a good start.
+
+---
+
+### Tuning `VelocityPIDFController`
+
+The process is similar but focuses on velocity error instead of position error.
+
+1.  **Tune `kS` and `kV`:**
+    *   Your goal is to make the feedforward term (`kV * targetVelocity + kS`) get the motor *almost* to the correct speed on its own.
+    *   Command a target velocity and adjust `kV` until the actual velocity is close to the target. `kS` helps overcome initial friction to get spinning.
+2.  **Tune `kP`:**
+    *   With `kV` and `kS` set, introduce `kP` to correct any remaining error between the target and actual velocity. Increase `kP` until the velocity is stable and accurate.
+3.  **Tune `kD`:**
+    *   `kD` acts on the change in velocity (acceleration). It can help smooth the response and prevent the velocity from overshooting the target aggressively. Use with caution.
+4.  **Tune `kI`:**
+    *   If there's a persistent error (e.g., due to changing battery voltage or load), a small `kI` can help maintain the target velocity perfectly over time.
+
+---
+
+### Final Tips
+
+*   **Iterate:** Tuning is not a one-shot deal. After setting all gains, you may need to go back and make small adjustments to `kP` or `kD`.
+*   **Save Your Values:** Once you have a good set of gains, write them down!
+*   **One Change at a Time:** Only adjust one gain at a time to clearly see its effect.
