@@ -39,11 +39,11 @@ android {
     }
 }
 
-//repositories {
-//    maven {
-//        url = "https://repo.dairy.foundation/releases"
-//    }
-//}
+
+
+repositories {
+        maven { url = 'https://maven.brott.dev/' }
+}
 
 dependencies {
     implementation project(':FtcRobotController')
@@ -51,11 +51,15 @@ dependencies {
     implementation 'dev.nextftc:ftc:1.0.0'
     implementation 'dev.nextftc:hardware:1.0.0' // If you would like to use the hardware module
 
-//    implementation('com.pedropathing:ftc:2.0.1') {
+    //    implementation('com.pedropathing:ftc:2.0.1') {
 //        exclude group: "com.acmerobotics.dashboard"
 //    }
 
 //    implementation("dev.frozenmilk.sinister:Sloth:0.2.4")
 //    implementation("com.acmerobotics.slothboard:dashboard:0.2.4+0.4.17")
 //    implementation("page.j5155.AdvantageScope:lite:v26.0.0")
+
+    implementation('com.acmerobotics.dashboard:dashboard:0.5.0') {
+        exclude group: 'org.firstinspires.ftc'
+    }
 }
