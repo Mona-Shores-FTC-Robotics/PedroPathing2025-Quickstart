@@ -21,35 +21,35 @@ public class Constants {
             .useSecondaryTranslationalPIDF(true)
             .useSecondaryHeadingPIDF(true)
             .useSecondaryDrivePIDF(true)
-            .translationalPIDFCoefficients(new PIDFCoefficients(0.1, 0, 0.01, 0.12))
-            .secondaryTranslationalPIDFCoefficients(new PIDFCoefficients(0.0001,0,0.0001,0.08))
+            .translationalPIDFCoefficients(new PIDFCoefficients(0, 0, 0, 0))
+            .secondaryTranslationalPIDFCoefficients(new PIDFCoefficients(0,0,0,0))
 //            .headingPIDFCoefficients(new PIDFCoefficients(0.05,0,0.0,0.11))
 //            .secondaryHeadingPIDFCoefficients(new PIDFCoefficients(0,0,0.000,0.08))
 
-            .headingPIDFCoefficients(new PIDFCoefficients(.3,0,0.0,0.01))
-            .secondaryHeadingPIDFCoefficients(new PIDFCoefficients(.3,0,0.000,0.01))
+            .headingPIDFCoefficients(new PIDFCoefficients(0,0,0.0,0))
+            .secondaryHeadingPIDFCoefficients(new PIDFCoefficients(0,0,0.000,0))
 
-            .drivePIDFCoefficients(new FilteredPIDFCoefficients(.008,0,0.0,.6, .01))
-            .secondaryDrivePIDFCoefficients(new FilteredPIDFCoefficients(.004,0,0,.6, .01))
+            .drivePIDFCoefficients(new FilteredPIDFCoefficients(0,0,0.0,0, 0))
+            .secondaryDrivePIDFCoefficients(new FilteredPIDFCoefficients(0,0,0,0, 0))
 
             .mass(5);
 
     public static MecanumConstants driveConstants = new MecanumConstants()
             .maxPower(1.0)
-            .rightFrontMotorName("rf")
-            .rightRearMotorName("rb")
-            .leftRearMotorName("lb")
-            .leftFrontMotorName("lf")
+            .rightFrontMotorName("rf") //  Motor Port 0
+            .rightRearMotorName("rb") //   Motor Port 1
+            .leftRearMotorName("lb") //    Motor Port 2
+            .leftFrontMotorName("lf") //   Motor Port 3
             .leftFrontMotorDirection(DcMotorSimple.Direction.REVERSE)
-            .leftRearMotorDirection(DcMotorSimple.Direction.REVERSE)
-            .rightFrontMotorDirection(DcMotorSimple.Direction.FORWARD)
-            .rightRearMotorDirection(DcMotorSimple.Direction.FORWARD);
+            .leftRearMotorDirection(DcMotorSimple.Direction.FORWARD)
+            .rightFrontMotorDirection(DcMotorSimple.Direction.REVERSE)
+            .rightRearMotorDirection(DcMotorSimple.Direction.REVERSE);
 
     public static PinpointConstants localizerConstants = new PinpointConstants()
-            .forwardPodY(0)
-            .strafePodX(-2)
+            .forwardPodY(3.25)
+            .strafePodX(5)
             .distanceUnit(DistanceUnit.INCH)
-            .hardwareMapName("pinpoint")
+            .hardwareMapName("pinpoint") // I2C Bus 1 Expansion
             .encoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD)
             .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED)
             .strafeEncoderDirection(GoBildaPinpointDriver.EncoderDirection.FORWARD);
