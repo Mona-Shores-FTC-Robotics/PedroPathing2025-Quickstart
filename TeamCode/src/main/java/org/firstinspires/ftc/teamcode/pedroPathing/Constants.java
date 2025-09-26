@@ -21,16 +21,14 @@ public class Constants {
             .useSecondaryTranslationalPIDF(true)
             .useSecondaryHeadingPIDF(true)
             .useSecondaryDrivePIDF(true)
-            .translationalPIDFCoefficients(new PIDFCoefficients(0.1, 0, 0.01, 0.12))
-            .secondaryTranslationalPIDFCoefficients(new PIDFCoefficients(0.0001,0,0.0001,0.08))
-//            .headingPIDFCoefficients(new PIDFCoefficients(0.05,0,0.0,0.11))
-//            .secondaryHeadingPIDFCoefficients(new PIDFCoefficients(0,0,0.000,0.08))
+            .translationalPIDFCoefficients(new PIDFCoefficients(0, 0, 0, 0))
+            .secondaryTranslationalPIDFCoefficients(new PIDFCoefficients(0,0,0,0))
 
-            .headingPIDFCoefficients(new PIDFCoefficients(.3,0,0.0,0.01))
-            .secondaryHeadingPIDFCoefficients(new PIDFCoefficients(.3,0,0.000,0.01))
+            .headingPIDFCoefficients(new PIDFCoefficients(0,0,0,0))
+            .secondaryHeadingPIDFCoefficients(new PIDFCoefficients(0,0,0,0))
 
-            .drivePIDFCoefficients(new FilteredPIDFCoefficients(.008,0,0.0,.6, .01))
-            .secondaryDrivePIDFCoefficients(new FilteredPIDFCoefficients(.004,0,0,.6, .01))
+            .drivePIDFCoefficients(new FilteredPIDFCoefficients(0,0,0.0,.6, 0))
+            .secondaryDrivePIDFCoefficients(new FilteredPIDFCoefficients(0,0,0,.6, 0))
 
             .mass(5);
 
@@ -51,8 +49,8 @@ public class Constants {
             .distanceUnit(DistanceUnit.INCH)
             .hardwareMapName("pinpoint")
             .encoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD)
-            .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED)
-            .strafeEncoderDirection(GoBildaPinpointDriver.EncoderDirection.FORWARD);
+            .forwardEncoderDirection(GoBildaPinpointDriver.EncoderDirection.FORWARD)
+            .strafeEncoderDirection(GoBildaPinpointDriver.EncoderDirection.REVERSED);
 
     public static PathConstraints pathConstraints = new PathConstraints(0.99, 100, 1, 1);
 
