@@ -1,4 +1,7 @@
+//untested code with override for right stick
 package org.firstinspires.ftc.teamcode.pedroPathing;
+
+import static dev.nextftc.bindings.Bindings.button;
 
 import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.PanelsTelemetry;
@@ -10,11 +13,15 @@ import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
 import java.util.function.DoubleSupplier;
 
+// NextFTC bindings
+import dev.nextftc.bindings.BindingManager;
+
 /**
- * Field-centric mecanum TeleOp with auto-heading to the left-stick direction.
- * Uses a raw yaw provider (Pinpoint degrees preferred) with an offset so that 0° = away from alliance wall.
- * Translation starts immediately; heading converges over 1.524 m (5 ft).
- * Right-stick temporarily overrides rotation; on release, desired heading snaps to current yaw.
+ * Field-centric mecanum TeleOp with auto-heading toward the left-stick direction.
+ * 0 deg = away from the alliance wall. Right stick overrides rotation.
+ * Single Precision Mode while RIGHT BUMPER is held:
+ *   - Slower translation and rotation
+ *   - Auto-heading suppressed for clean strafes and fine control
  * SDK: 11.0.0, PedroPathing: 2.0.2
  */
 @Configurable
@@ -28,31 +35,53 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
     // ===== Telemetry =====
     private TelemetryManager telemetryM;
 
-    // ===== Configurables =====
-    @Configurable public static double MOVE_DEADBAND = 0.08;                // left stick
-    @Configurable public static double ROT_DEADBAND  = 0.10;                // right stick
-    @Configurable public static double OMEGA_MAX_RAD = Math.toRadians(180); // max yaw rate
-    @Configurable public static double KP_HOLD       = 3.0;                 // rad/s per rad
-    @Configurable public static double L_CONV_M      = 1.524;               // 5 ft in meters
-    @Configurable public static double SLEW_RATE_UNITS_PER_S = 3.0;         // left-stick rate limit 0..1/s
-    @Configurable public static double DIR_RESET_DEG = 11;                  // reset threshold
+    // ===== Configurables (simple) =====
+    public static double MOVE_DEADBAND = 0.08;                 // left stick
+    public static double ROT_DEADBAND  = 0.10;                 // right stick
+    public static double OMEGA_MAX_RAD = Math.toRadians(90);   // max yaw rate
+    public static double KP_HOLD       = 1.4;                  // heading hold gain when stopped
+    public static double L_CONV_M      = 2.5;                  // meters over which heading converges while moving
+    public static double SLEW_RATE_UNITS_PER_S = 3.0;          // left-stick rate limit 0..1/s
+    public static double DIR_RESET_DEG = 11;                   // reset threshold
+
+    // Precision Mode scale while right bumper is held
+    public static double PRECISION_MULTIPLIER = 0.40;          // scales both translation and rotation
+
+    // After manual rotation ends, wait this long before re-enabling auto-heading
+    public static double AUTOHEADING_REARM_TIME_S = 0.35;
+
+    // Treat any right-stick input past this raw threshold as a manual override
+    public static double MANUAL_OVERRIDE_THRESH = 0.02;
+
+    // Final flag passed to setTeleOpDrive(..., field_or_robot_flag)
+    // Set this to the value your Pedro version expects for FIELD-CENTRIC.
+    public static boolean FIELD_OR_ROBOT_FLAG = false;
+
+    // Axis and rotation sign flips
+    public static boolean INVERT_FIELD_X = false;              // invert field X (forward)
+    public static boolean INVERT_FIELD_Y = true;               // invert field Y (left)
+    public static boolean INVERT_ROT_STICK = false;            // flip right stick rotation if needed
+    public static boolean NEGATE_FIELD_YAW = false;            // negate psi if IMU heading sign is opposite
 
     // ===== Yaw source (Pinpoint preferred) =====
-    // Provide degrees to be kid-friendly; we convert to radians internally.
-    private DoubleSupplier yawDegSupplier; // e.g., () -> pinpoint.getHeading() in degrees
+    private DoubleSupplier yawDegSupplier; // returns degrees
 
     // ===== State =====
-    private double yawOffset = 0; // radians; makes current raw yaw map to field frame
-    private double desiredPsi = 0, lastDesiredPsi = 0; // radians
-    private double sSinceDirChange = 0; // meters
+    private double yawOffset = 0;          // radians
+    private double desiredPsi = 0;         // radians
+    private double lastDesiredPsi = 0;     // radians
+    private double sSinceDirChange = 0;    // meters
     private Pose   lastPose;
-    private boolean slowMode = false;
-    private double slowModeMultiplier = 0.5;
-    private boolean autoHeading = true;
+
+    // Precision Mode flag (held while RB is pressed)
+    private boolean precisionMode = false;
+
+    // Manual rotation state
     private boolean prevManualRot = false; // detect override release
+    private double autoHeadingRearmT = 0;  // seconds remaining until auto-heading is allowed again
 
     // Slew limiting
-    private double prevLx = 0, prevLy = 0;
+    private double prevFx = 0, prevFy = 0;
     private long   lastInputTsNanos = 0;
 
     // ===== API for Auto to set yaw offset using known start heading =====
@@ -70,80 +99,108 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         follower.setStartingPose(startingPose == null ? new Pose() : startingPose);
         follower.update();
         lastPose = follower.getPose();
-
         telemetryM = PanelsTelemetry.INSTANCE.getTelemetry();
 
-        // DEFAULT YAW PROVIDER: follower heading (radians) converted to degrees.
-        // Replace with your Pinpoint call, e.g., yawDegSupplier = () -> pinpoint.getHeading();
+        // Default yaw provider uses Pedro heading
         yawDegSupplier = () -> Math.toDegrees(follower.getHeading());
 
-        // Initialize input timestamps for slew limiting
         long now = System.nanoTime();
         lastInputTsNanos = now;
-        prevLx = 0; prevLy = 0;
+        prevFx = 0; prevFy = 0;
     }
 
     @Override
     public void start() {
         follower.startTeleopDrive();
 
-        // If Auto did not set an offset, make current facing the field-forward 0°
-        if (startingPose == null) {
-            setZeroToCurrent();
-        } else {
-            // Optionally align field zero to alliance standard quickly using D-pad at match start
-            // leave as-is if Auto prepared yawOffset externally
-        }
+        // If Auto did not set an offset, make current facing the field-forward 0 deg
+        if (startingPose == null) setZeroToCurrent();
 
         desiredPsi = getFieldYaw();
         lastDesiredPsi = desiredPsi;
         sSinceDirChange = 0;
+
+        // Precision Mode while RIGHT BUMPER is held
+        button(() -> gamepad1.right_bumper)
+                .whenBecomesTrue(() -> {
+                    precisionMode = true;
+                    desiredPsi = getFieldYaw();
+                    lastDesiredPsi = desiredPsi;
+                })
+                .whenBecomesFalse(() -> {
+                    precisionMode = false;
+                    desiredPsi = getFieldYaw();
+                    lastDesiredPsi = desiredPsi;
+                });
+
+        // Optional D-pad zeroing helpers
+        button(() -> gamepad1.dpad_up)   .whenBecomesTrue(() -> setZeroToDeg(0));
+        button(() -> gamepad1.dpad_left) .whenBecomesTrue(() -> setZeroToDeg(90));
+        button(() -> gamepad1.dpad_down) .whenBecomesTrue(() -> setZeroToDeg(180));
+        button(() -> gamepad1.dpad_right).whenBecomesTrue(() -> setZeroToDeg(270));
     }
 
     @Override
     public void loop() {
+        // Update bindings first so they affect this loop
+        BindingManager.update();
+
         follower.update();
-        telemetryM.update(); // Make sure to call update on telemetryM to send data
+        telemetryM.update();
 
-        handleZeroingButtons();
-        handleSlowModeToggle();
-
-        // Read sticks (FTC style: forward is -Y)
+        // Pedro field convention: X = forward (away from alliance wall), Y = left
         long nowInput = System.nanoTime();
-        double dtIn = (nowInput - lastInputTsNanos)/1e9; if (dtIn <= 0) dtIn = 1e-3;
+        double dtIn = (nowInput - lastInputTsNanos) / 1e9; if (dtIn <= 0) dtIn = 1e-3;
 
-        double lx = -gamepad1.left_stick_x; // Corrected: In FTC, left_stick_x is typically strafe
-        double ly = -gamepad1.left_stick_y; // Corrected: In FTC, left_stick_y is typically forward/backward
-        double rx = -gamepad1.right_stick_x; // Corrected: In FTC, right_stick_x is typically turn
+        // Map sticks into FIELD frame
+        double fx = -gamepad1.left_stick_y;    // forward +
+        double fy =  gamepad1.left_stick_x;    // left +
+        if (INVERT_FIELD_X) fx = -fx;
+        if (INVERT_FIELD_Y) fy = -fy;
 
-        lx = deadband(lx, MOVE_DEADBAND);
-        ly = deadband(ly, MOVE_DEADBAND);
-        rx = deadband(rx, ROT_DEADBAND);
+        // RAW right stick for override detection
+        double rxRaw = INVERT_ROT_STICK ? gamepad1.right_stick_x : -gamepad1.right_stick_x;
+        // Deadbanded right stick for actual rotation rate
+        double rx = deadband(rxRaw, ROT_DEADBAND);
+
+        fx = deadband(fx, MOVE_DEADBAND);
+        fy = deadband(fy, MOVE_DEADBAND);
 
         // Slew limit left stick to avoid step changes
-        lx = slew(lx, prevLx, SLEW_RATE_UNITS_PER_S, dtIn);
-        ly = slew(ly, prevLy, SLEW_RATE_UNITS_PER_S, dtIn);
-        prevLx = lx; prevLy = ly; lastInputTsNanos = nowInput;
+        fx = slew(fx, prevFx, SLEW_RATE_UNITS_PER_S, dtIn);
+        fy = slew(fy, prevFy, SLEW_RATE_UNITS_PER_S, dtIn);
+        prevFx = fx; prevFy = fy; lastInputTsNanos = nowInput;
+
+        // Advance the re-arm timer
+        autoHeadingRearmT = Math.max(0, autoHeadingRearmT - dtIn);
 
         double psi = getFieldYaw(); // radians
-        boolean manualRot = Math.abs(rx) > ROT_DEADBAND;
 
-        double mag = Math.hypot(lx, ly);
-        if (mag > MOVE_DEADBAND && autoHeading && !manualRot){
-            // Standard atan2 arguments are (y, x) for angle from positive x-axis
-            // For field-centric, if ly is forward (field Y) and lx is strafe (field X):
-            desiredPsi = Math.atan2(ly, lx);
+        // Manual override uses RAW threshold, so any small driver input disables auto-heading immediately
+        boolean manualRot = Math.abs(rxRaw) > MANUAL_OVERRIDE_THRESH;
+
+        // Auto-heading is allowed only if:
+        //  - not in precision mode
+        //  - not currently rotating manually
+        //  - the re-arm timer has expired
+        double mag = Math.hypot(fx, fy);
+        boolean allowAutoHeading = !precisionMode && !manualRot && (autoHeadingRearmT == 0);
+
+        if (mag > MOVE_DEADBAND && allowAutoHeading){
+            desiredPsi = Math.atan2(fy, fx); // field direction
         }
 
-        // Detect large desired heading change and reset path distance
+        // Reset path distance if desired heading jumps
         double dPsiDes = wrap(desiredPsi - lastDesiredPsi);
         if (Math.abs(dPsiDes) > Math.toRadians(DIR_RESET_DEG)) sSinceDirChange = 0;
         sSinceDirChange += updateDistance();
         lastDesiredPsi = desiredPsi;
 
-        // Snap desired heading on manual override release
-        if (prevManualRot && !manualRot){
+        // On manual rotation release, snap hold to current and start the re-arm delay
+        if (prevManualRot && !manualRot) {
             desiredPsi = psi;
+            lastDesiredPsi = desiredPsi;
+            autoHeadingRearmT = AUTOHEADING_REARM_TIME_S;
         }
         prevManualRot = manualRot;
 
@@ -151,160 +208,77 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         double e = wrap(desiredPsi - psi);
         double omega;
         if (manualRot){
-            omega = rx * OMEGA_MAX_RAD; // manual override
-        } else if (mag <= MOVE_DEADBAND){
-            omega = KP_HOLD * e;        // heading hold when stopped
+            omega = rx * OMEGA_MAX_RAD; // manual override only, no correction
+        } else if (mag <= MOVE_DEADBAND || precisionMode){
+            omega = KP_HOLD * e;        // firm hold when stopped or in precision mode
         } else {
-            // Spatial convergence toward L_CONV_M
-            double v = mag;
-            omega = v * e / L_CONV_M; // This is a simplified proportional control based on distance to convergence point for heading
-            omega = clamp(omega, -OMEGA_MAX_RAD, OMEGA_MAX_RAD);
+            double v = mag;             // proxy for speed from stick magnitude
+            omega = clamp(v * e / L_CONV_M, -OMEGA_MAX_RAD, OMEGA_MAX_RAD);
         }
 
-        // Field→robot transform using -psi (current field heading of robot)
-        // Standard rotation: x' = x*cos(a) - y*sin(a), y' = x*sin(a) + y*cos(a)
-        // Here, (lx, ly) are field-frame commands. We want robot-frame commands (strafeR, forwardR)
-        // Robot X is forward, Robot Y is left.
-        // Field X is right, Field Y is forward.
-        // To transform field commands (lx, ly) to robot commands (forwardR, strafeR):
-        // forwardR = lx * cos(psi) + ly * sin(psi)  <-- No, this is robot to field.
-        // forwardR = ly * cos(psi) + lx * sin(psi)  <-- If lx is field X, ly is field Y
-        // strafeR  = -ly * sin(psi) + lx * cos(psi)
+        // One slow factor, held on RB
+        double f = precisionMode ? PRECISION_MULTIPLIER : 1.0;
 
-        // Simpler: inputs lx (field X / strafe) and ly (field Y / forward)
-        // Robot forward command = ly_field * cos(-psi) - lx_field * sin(-psi)
-        // Robot strafe command  = ly_field * sin(-psi) + lx_field * cos(-psi)
-        // Oh, the original code used:
-        // double strafeR  = lx * c - ly * s; where c = cos(-psi), s = sin(-psi)
-        // double forwardR = lx * s + ly * c;
-        // This means lx is treated as "x" and ly as "y" in a coordinate system rotated by -psi.
-        // If lx = field_X (strafe right positive) and ly = field_Y (forward positive)
-        // Then forward_robot = ly_field * cos(psi) - lx_field * sin(psi)
-        //      strafe_robot = ly_field * sin(psi) + lx_field * cos(psi)
-        // Let's re-verify the original snippet's transform.
-        // If psi is robot's heading in field frame:
-        // Robot's X-axis (forward) aligns with field vector (cos(psi), sin(psi))
-        // Robot's Y-axis (strafe left) aligns with field vector (-sin(psi), cos(psi))
-        // Field commands (lx, ly)
-        // forwardR (robot X component) = lx * cos(psi) + ly * sin(psi)
-        // strafeR  (robot Y component) = lx * (-sin(psi)) + ly * cos(psi) --- this would be strafe LEFT positive
-        // The original code has:
-        // double c = Math.cos(-psi), s = Math.sin(-psi);
-        // double strafeR  = lx * c - ly * s;  => lx*cos(-psi) - ly*sin(-psi) => lx*cos(psi) + ly*sin(psi)
-        // double forwardR = lx * s + ly * c;  => lx*sin(-psi) + ly*cos(-psi) => -lx*sin(psi) + ly*cos(psi)
-        // This implies:
-        //   'strafeR' in their code is along the original X-axis rotated by -psi.
-        //   'forwardR' in their code is along the original Y-axis rotated by -psi.
-        // If their lx, ly were Cartesian (x right, y up), and robot frame is x forward, y left:
-        // Field X (lx), Field Y (ly)
-        // Robot Forward = lx * cos(psi) + ly * sin(psi)
-        // Robot Strafe (left) = -lx * sin(psi) + ly * cos(psi)
-        // The follower.setTeleOpDrive expects (forward, strafe, turn), where positive strafe is typically left.
-        // Given the gamepad inputs:
-        // lx = -gamepad1.left_stick_x; (positive is field right)
-        // ly = -gamepad1.left_stick_y; (positive is field forward)
-
-        // Let's use the standard field-to-robot transformation:
-        // Field commands: targetFieldVx = lx, targetFieldVy = ly
-        // Robot commands:
-        // robotVx (forward) = targetFieldVx * cos(psi) + targetFieldVy * sin(psi)
-        // robotVy (strafeLeft) = -targetFieldVx * sin(psi) + targetFieldVy * cos(psi)
-        // This is what Pedro Pathing Follower.setTeleOpDrive expects (if positive strafe is left)
-
-        double fieldVx = lx; // Positive is right in field
-        double fieldVy = ly; // Positive is forward in field
-
-        double robotForward = fieldVx * Math.cos(psi) + fieldVy * Math.sin(psi);
-        double robotStrafe  = -fieldVx * Math.sin(psi) + fieldVy * Math.cos(psi); // Positive is left strafe
-
-
-        double f = slowMode ? slowModeMultiplier : 1.0;
-        // The last boolean for setTeleOpDrive is often 'fieldCentric'. If true, follower handles the transform.
-        // If false, we provide robot-centric values. The comment says "robot-centric because we did the transform"
-        // so `true` in the original might have been a mistake or different interpretation for that specific `setTeleOpDrive`.
-        // PedroPathing's Follower.setTeleOpDrive(double drivePower, double strafePower, double turnPower, boolean fieldCentric)
-        // If fieldCentric is true, it expects field-relative powers. If false, robot-relative.
-        // Since we are calculating robotForward and robotStrafe, we should pass fieldCentric = false.
-        follower.setTeleOpDrive(robotForward * f, robotStrafe * f, omega * f, false);
+        // Pass the flag exactly as your Pedro version expects
+        follower.setTeleOpDrive(fx * f, fy * f, omega * f, FIELD_OR_ROBOT_FLAG);
 
         // Debug telemetry
+        telemetryM.debug("PrecisionMode(RB held)", precisionMode);
+        telemetryM.debug("AutoHeadingRearm(s)", autoHeadingRearmT);
         telemetryM.debug("Field Yaw (deg)", Math.toDegrees(psi));
         telemetryM.debug("Desired Yaw (deg)", Math.toDegrees(desiredPsi));
-        telemetryM.debug("Error (deg)", Math.toDegrees(e));
         telemetryM.debug("Omega (deg/s)", Math.toDegrees(omega));
-        telemetryM.debug("sSinceDirChange(m)", sSinceDirChange);
-        telemetryM.debug("Raw LX", gamepad1.left_stick_x);
-        telemetryM.debug("Raw LY", gamepad1.left_stick_y);
-        telemetryM.debug("Field Vx (lx)", lx);
-        telemetryM.debug("Field Vy (ly)", ly);
-        telemetryM.debug("Robot Forward", robotForward);
-        telemetryM.debug("Robot Strafe", robotStrafe);
-        telemetryM.debug("Slow Mode", slowMode);
+        telemetryM.debug("fx, fy", String.format("%.3f, %.3f", fx, fy));
+        telemetryM.debug("FlagPassed", FIELD_OR_ROBOT_FLAG);
+        telemetryM.debug("InvertX,Y", String.format("%b,%b", INVERT_FIELD_X, INVERT_FIELD_Y));
+    }
+
+    @Override
+    public void stop() {
+        BindingManager.reset();
     }
 
     // ===== Helpers =====
     private double getFieldYaw(){
-        // Convert supplier degrees → radians and add offset
         double psiRaw = Math.toRadians(yawDegSupplier.getAsDouble());
-        return wrap(psiRaw + yawOffset);
+        double psi = wrap(psiRaw + yawOffset);
+        return NEGATE_FIELD_YAW ? -psi : psi;
     }
 
     private void setZeroToCurrent(){
         double psiRaw = Math.toRadians(yawDegSupplier.getAsDouble());
-        yawOffset = wrap(0 - psiRaw); // Sets current raw yaw to be field 0
+        yawOffset = wrap(0 - psiRaw);
     }
 
     private double updateDistance(){
         Pose p = follower.getPose();
-        // Distance calculation should be in field frame if sSinceDirChange is field path length
-        double dx = p.getX() - lastPose.getX(); // These are field frame coords from PedroPathing
-        double dy = p.getY() - lastPose.getY();
+        double dx = p.getX() - lastPose.getX(); // field X forward
+        double dy = p.getY() - lastPose.getY(); // field Y left
         lastPose = p;
         return Math.hypot(dx, dy);
-    }
-
-    private void handleZeroingButtons(){
-        // Cardinal zeroing: 0° away from alliance wall; +CCW
-        if (gamepad1.dpad_up)    setZeroToDeg(0);    // Field Forward
-        if (gamepad1.dpad_left)  setZeroToDeg(90);   // Field Left
-        if (gamepad1.dpad_down)  setZeroToDeg(180);  // Field Backward
-        if (gamepad1.dpad_right) setZeroToDeg(270);  // Field Right
-    }
-
-    private void handleSlowModeToggle(){
-        // Use a "wasPressed" to avoid rapid toggling if button is held
-        if (gamepad1.right_bumper && !gamepad1_was_right_bumper_last_frame) { // pseudo code, needs state
-            slowMode = !slowMode;
-        }
-        // gamepad1_was_right_bumper_last_frame = gamepad1.right_bumper; // manage this state if not part of SDK OpMode
-        // FTC SDK provides gamepadX.xWasPressed() for this. The user's code had `rightBumperWasPressed()`
-        // which implies it might be a custom Gamepad wrapper or a newer SDK feature not in base OpMode.
-        // Assuming `gamepad1.rightBumperWasPressed()` is available as in the original snippet.
-        if (gamepad1.rightBumperWasPressed()) slowMode = !slowMode;
-
     }
 
     private void setZeroToDeg(double deg){
         double psiRaw = Math.toRadians(yawDegSupplier.getAsDouble());
         yawOffset = wrap(Math.toRadians(deg) - psiRaw);
-        desiredPsi = getFieldYaw(); // Also update desiredPsi to prevent sudden rotation
+        desiredPsi = getFieldYaw();
         lastDesiredPsi = desiredPsi;
     }
 
     private static double deadband(double v, double d){ return Math.abs(v) < d ? 0 : v; }
     private static double clamp(double v, double lo, double hi){ return Math.max(lo, Math.min(hi, v)); }
-    private static double wrap(double a){ // Wraps to [-PI, PI]
+    private static double wrap(double a){
         while (a >  Math.PI) a -= 2*Math.PI;
         while (a < -Math.PI) a += 2*Math.PI;
         return a;
     }
     private static double slew(double target, double prev, double rate, double dt){
         double maxDelta = rate * dt;
-        double delta = clamp(target - prev, -maxDelta, maxDelta); // clamp the delta itself
+        double delta = clamp(target - prev, -maxDelta, maxDelta);
         return prev + delta;
     }
 
-    // ===== Optional: expose a method to set the yaw source to Pinpoint degrees =====
+    // Optional: swap in Pinpoint degrees as the yaw source
     public void usePinpointYawDegrees(DoubleSupplier pinpointYawDegrees){
         this.yawDegSupplier = pinpointYawDegrees;
     }
