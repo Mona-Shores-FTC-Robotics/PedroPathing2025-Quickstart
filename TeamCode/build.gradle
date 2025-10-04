@@ -1,70 +1,34 @@
-//buildscript {
-//    repositories {
-//        mavenCentral()
-//        maven {
-//            url "https://repo.dairy.foundation/releases"
-//        }
-//    }
-//    dependencies {
-//        classpath "dev.frozenmilk:Load:0.2.4"
-//    }
-//}
+// TeamCode/build.gradle for the command‑based DECODE scaffold
 //
-// build.gradle in TeamCode
-//
-// Most of the definitions for building your module reside in a common, shared
-// file 'build.common.gradle'. Being factored in this way makes it easier to
-// integrate updates to the FTC into your code. If you really need to customize
-// the build definitions, you can place those customizations in this file, but
-// please think carefully as to whether such customizations are really necessary
-// before doing so.
+// This build file intentionally omits NextFTC and Pedro Pathing dependencies.
+// It adds FTC Dashboard so that telemetry can be viewed in a browser (and
+// AdvantageScope) and otherwise relies on the standard FtcRobotController
+// libraries.  Additional dependencies such as NextFTC or Pedro can be added
+// later once integration begins.
 
-
-// Custom definitions may go here
-
-// Include common definitions from above.
+// Include shared definitions.  These scripts are expected to reside one
+// directory up from TeamCode.  If your project structure differs you may
+// need to adjust these paths.
 apply from: '../build.common.gradle'
 apply from: '../build.dependencies.gradle'
-//apply plugin: 'dev.frozenmilk.sinister.sloth.load'
-
 
 android {
+    // Set your Java package (also declared in AndroidManifest.xml).  Do not
+    // change this without updating the package of your Java code.
     namespace = 'org.firstinspires.ftc.teamcode'
-
-    packagingOptions {
-        jniLibs {
-            pickFirsts += ['**/*.so']
-        }
-        jniLibs.useLegacyPackaging true
-    }
 }
 
-
-
+// Additional Maven repositories can be declared here if needed
 repositories {
-    maven { url = 'https://maven.brott.dev/' }
-    maven { url = 'https://maven.pedropathing.com' }
-    maven { url = "https://mymaven.bylazar.com/releases" }
+    mavenCentral()
+    // Add the FTC Dashboard repository if you host your own.  Default Maven
+    // should suffice for acmerobotics dependencies.
 }
 
 dependencies {
+    // Always include the main FTC robot controller library
     implementation project(':FtcRobotController')
 
-    //NextFTC
-    implementation 'dev.nextftc:ftc:1.0.0'
-    implementation 'dev.nextftc:hardware:1.0.0' // If you would like to use the hardware module
-
-    //FTC Dashboard
-    implementation('com.acmerobotics.dashboard:dashboard:0.5.0') {
-        exclude group: 'org.firstinspires.ftc'
-    }
-
-    // Pedro Pathing
-    implementation('com.pedropathing:ftc:2.0.2')
-    implementation 'com.pedropathing:telemetry:1.0.0'   // <-- update to 1.0.0
-
-    //Panels
-    implementation 'com.bylazar:fullpanels:1.0.6'
-
-
+    // FTC Dashboard library for real‑time telemetry and graphing
+    implementation 'com.acmerobotics.dashboard:ftc-dashboard:0.4.8'
 }
