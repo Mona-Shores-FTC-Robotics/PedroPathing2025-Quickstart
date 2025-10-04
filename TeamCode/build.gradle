@@ -45,6 +45,8 @@ repositories {
     maven { url = 'https://maven.brott.dev/' }
     maven { url = 'https://maven.pedropathing.com' }
     maven { url = "https://mymaven.bylazar.com/releases" }
+    maven { url = "https://repo.dairy.foundation/releases" }   // add this above dependencies
+
 }
 
 dependencies {
@@ -65,6 +67,8 @@ dependencies {
 
     //Panels
     implementation 'com.bylazar:fullpanels:1.0.6'
+
+    implementation "page.j5155.AdvantageScope:lite:v26.0.0"
 
 
 }

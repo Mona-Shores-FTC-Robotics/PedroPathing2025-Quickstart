@@ -1,8 +1,10 @@
-//untested code with override for right stick
+// Rest-on-release auto-heading with clean handoffs and no proportional hold at rest.
 package org.firstinspires.ftc.teamcode.pedroPathing;
 
 import static dev.nextftc.bindings.Bindings.button;
 
+import com.acmerobotics.dashboard.FtcDashboard;
+import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import com.bylazar.configurables.annotations.Configurable;
 import com.bylazar.telemetry.PanelsTelemetry;
 import com.bylazar.telemetry.TelemetryManager;
@@ -19,14 +21,15 @@ import dev.nextftc.bindings.BindingManager;
 /**
  * Field-centric mecanum TeleOp with auto-heading toward the left-stick direction.
  * 0 deg = away from the alliance wall. Right stick overrides rotation.
- * Single Precision Mode while RIGHT BUMPER is held:
- *   - Slower translation and rotation
- *   - Auto-heading suppressed for clean strafes and fine control
+ * Precision Mode (RB held) suppresses auto-heading for clean strafes.
  * SDK: 11.0.0, PedroPathing: 2.0.2
  */
 @Configurable
 @TeleOp(name = "FieldCentricAutoHeadingTeleOp", group = "Pedro")
 public class FieldCentricAutoHeadingTeleOp extends OpMode {
+
+    private FtcDashboard dash;
+    public static boolean POSE_IS_METERS = false; // set true only if your Pose units are meters
 
     // ===== Pedro follower and pose =====
     private Follower follower;
@@ -35,26 +38,27 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
     // ===== Telemetry =====
     private TelemetryManager telemetryM;
 
-    // ===== Configurables (simple) =====
+    // ===== Configurables =====
     public static double MOVE_DEADBAND = 0.08;                 // left stick
     public static double ROT_DEADBAND  = 0.10;                 // right stick
     public static double OMEGA_MAX_RAD = Math.toRadians(90);   // max yaw rate
-    public static double KP_HOLD       = 1.4;                  // heading hold gain when stopped
-    public static double L_CONV_M      = 2.5;                  // meters over which heading converges while moving
+    public static double L_CONV_M      = 2.5;                  // meters for heading convergence while moving
     public static double SLEW_RATE_UNITS_PER_S = 3.0;          // left-stick rate limit 0..1/s
-    public static double DIR_RESET_DEG = 11;                   // reset threshold
+    public static double DIR_RESET_DEG = 11;                   // reset path distance if desired heading jumps
 
     // Precision Mode scale while right bumper is held
     public static double PRECISION_MULTIPLIER = 0.40;          // scales both translation and rotation
 
-    // After manual rotation ends, wait this long before re-enabling auto-heading
+    // Manual override and auto-heading rearm
     public static double AUTOHEADING_REARM_TIME_S = 0.35;
+    public static double MANUAL_OVERRIDE_THRESH   = 0.02;
 
-    // Treat any right-stick input past this raw threshold as a manual override
-    public static double MANUAL_OVERRIDE_THRESH = 0.02;
+    // Rest policy
+    public static double REST_ARM_TIME_S      = 0.20;          // time after entering rest before drift snap allowed
+    public static double DRIFT_TAKEOVER_DEG   = 12.0;          // snap reference to current if drift exceeds this
 
     // Final flag passed to setTeleOpDrive(..., field_or_robot_flag)
-    // Set this to the value your Pedro version expects for FIELD-CENTRIC.
+    // Set to the value your Pedro version expects for FIELD-CENTRIC.
     public static boolean FIELD_OR_ROBOT_FLAG = false;
 
     // Axis and rotation sign flips
@@ -73,12 +77,13 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
     private double sSinceDirChange = 0;    // meters
     private Pose   lastPose;
 
-    // Precision Mode flag (held while RB is pressed)
     private boolean precisionMode = false;
 
-    // Manual rotation state
-    private boolean prevManualRot = false; // detect override release
-    private double autoHeadingRearmT = 0;  // seconds remaining until auto-heading is allowed again
+    private boolean prevMoving = false;
+    private boolean prevManualRot = false;
+    private boolean inRest = false;
+    private double  restArmingT = 0.0;     // seconds since entering rest
+    private double  autoHeadingRearmT = 0; // seconds remaining until auto-heading allowed again
 
     // Slew limiting
     private double prevFx = 0, prevFy = 0;
@@ -95,6 +100,8 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
     // ===== Lifecycle =====
     @Override
     public void init() {
+        dash = FtcDashboard.getInstance();
+
         follower = Constants.createFollower(hardwareMap);
         follower.setStartingPose(startingPose == null ? new Pose() : startingPose);
         follower.update();
@@ -107,6 +114,7 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         long now = System.nanoTime();
         lastInputTsNanos = now;
         prevFx = 0; prevFy = 0;
+
     }
 
     @Override
@@ -124,11 +132,13 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         button(() -> gamepad1.right_bumper)
                 .whenBecomesTrue(() -> {
                     precisionMode = true;
+                    // Snap reference on entry for clean handoff
                     desiredPsi = getFieldYaw();
                     lastDesiredPsi = desiredPsi;
                 })
                 .whenBecomesFalse(() -> {
                     precisionMode = false;
+                    // Keep reference equal to current on exit to avoid a jump
                     desiredPsi = getFieldYaw();
                     lastDesiredPsi = desiredPsi;
                 });
@@ -146,6 +156,34 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         BindingManager.update();
 
         follower.update();
+
+        // === Publish pose to AdvantageScope via FTC Dashboard ===
+        Pose p = follower.getPose();
+
+// Pedro Pathing tutorials and tuners commonly use inches. If your pose is in meters, convert.
+        double xIn = p.getX();
+        double yIn = p.getY();
+        if (POSE_IS_METERS) { // set this flag if your pose is meters
+            final double M_TO_IN = 39.37007874;
+            xIn *= M_TO_IN;
+            yIn *= M_TO_IN;
+        }
+
+// Your follower heading is already radians in your code.
+        double headingRad = follower.getHeading();
+
+        TelemetryPacket packet = new TelemetryPacket();
+        packet.put("Pose x", xIn);            // inches
+        packet.put("Pose y", yIn);            // inches
+        packet.put("Pose heading", headingRad); // radians
+// If you prefer degrees instead, publish this line instead of the radians line:
+// packet.put("Pose heading (deg)", Math.toDegrees(headingRad));
+
+        dash.sendTelemetryPacket(packet);
+
+
+
+
         telemetryM.update();
 
         // Pedro field convention: X = forward (away from alliance wall), Y = left
@@ -174,20 +212,43 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         // Advance the re-arm timer
         autoHeadingRearmT = Math.max(0, autoHeadingRearmT - dtIn);
 
-        double psi = getFieldYaw(); // radians
-
-        // Manual override uses RAW threshold, so any small driver input disables auto-heading immediately
+        // Current state
+        double psi = getFieldYaw(); // current heading in radians
+        double mag = Math.hypot(fx, fy);
+        boolean isMoving = mag > MOVE_DEADBAND;
         boolean manualRot = Math.abs(rxRaw) > MANUAL_OVERRIDE_THRESH;
 
-        // Auto-heading is allowed only if:
-        //  - not in precision mode
-        //  - not currently rotating manually
-        //  - the re-arm timer has expired
-        double mag = Math.hypot(fx, fy);
-        boolean allowAutoHeading = !precisionMode && !manualRot && (autoHeadingRearmT == 0);
+        // Detect edges for rest logic
+        boolean justStopped        =  prevMoving && !isMoving && !manualRot;
+        boolean justReleasedRot    =  prevManualRot && !manualRot && !isMoving;
+        boolean enteringRest       = (justStopped || justReleasedRot) || (!inRest && !isMoving && !manualRot);
+        boolean leavingRest        =  inRest && (isMoving || manualRot);
 
-        if (mag > MOVE_DEADBAND && allowAutoHeading){
-            desiredPsi = Math.atan2(fy, fx); // field direction
+        // Handle rest entry and exit
+        if (enteringRest) {
+            // Snap reference to current to ensure zero error on the rest frame
+            desiredPsi = psi;
+            restArmingT = 0.0;
+            inRest = true;
+        } else if (leavingRest) {
+            inRest = false;
+        }
+        if (inRest) restArmingT += dtIn;
+
+        // Determine desired heading based on mode
+        if (manualRot) {
+            // Manual rotation: driver owns heading. Track actual for clean handoff.
+            desiredPsi = psi;
+            autoHeadingRearmT = AUTOHEADING_REARM_TIME_S;
+        } else if (isMoving && !precisionMode && autoHeadingRearmT == 0) {
+            // Auto-heading only while translating and not in precision mode
+            desiredPsi = Math.atan2(fy, fx);
+        } else if (!isMoving && !manualRot) {
+            // Resting: desiredPsi already snapped on entry. Optionally snap again if drift grows large.
+            double err = Math.toDegrees(Math.abs(wrap(desiredPsi - psi)));
+            if (restArmingT >= REST_ARM_TIME_S && err >= DRIFT_TAKEOVER_DEG) {
+                desiredPsi = psi; // one-time snap to kill accumulated drift
+            }
         }
 
         // Reset path distance if desired heading jumps
@@ -196,37 +257,40 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         sSinceDirChange += updateDistance();
         lastDesiredPsi = desiredPsi;
 
-        // On manual rotation release, snap hold to current and start the re-arm delay
-        if (prevManualRot && !manualRot) {
-            desiredPsi = psi;
-            lastDesiredPsi = desiredPsi;
-            autoHeadingRearmT = AUTOHEADING_REARM_TIME_S;
-        }
-        prevManualRot = manualRot;
-
         // Angular command
         double e = wrap(desiredPsi - psi);
         double omega;
         if (manualRot){
-            omega = rx * OMEGA_MAX_RAD; // manual override only, no correction
-        } else if (mag <= MOVE_DEADBAND || precisionMode){
-            omega = KP_HOLD * e;        // firm hold when stopped or in precision mode
-        } else {
-            double v = mag;             // proxy for speed from stick magnitude
+            omega = rx * OMEGA_MAX_RAD; // manual only
+        } else if (precisionMode){
+            // Precision Mode suppresses auto-heading; rotation is manual only
+            omega = 0.0; // rx already zero here due to manualRot branch
+        } else if (isMoving){
+            double v = mag; // proxy for speed from stick magnitude
             omega = clamp(v * e / L_CONV_M, -OMEGA_MAX_RAD, OMEGA_MAX_RAD);
+        } else {
+            // Rest means rest: no proportional hold when stopped
+            omega = 0.0;
         }
 
         // One slow factor, held on RB
         double f = precisionMode ? PRECISION_MULTIPLIER : 1.0;
 
-        // Pass the flag exactly as your Pedro version expects
+        // Drive
         follower.setTeleOpDrive(fx * f, fy * f, omega * f, FIELD_OR_ROBOT_FLAG);
+
+        // Bookkeeping
+        prevMoving = isMoving;
+        prevManualRot = manualRot;
 
         // Debug telemetry
         telemetryM.debug("PrecisionMode(RB held)", precisionMode);
         telemetryM.debug("AutoHeadingRearm(s)", autoHeadingRearmT);
+        telemetryM.debug("InRest", inRest);
+        telemetryM.debug("RestArmingT(s)", restArmingT);
         telemetryM.debug("Field Yaw (deg)", Math.toDegrees(psi));
         telemetryM.debug("Desired Yaw (deg)", Math.toDegrees(desiredPsi));
+        telemetryM.debug("Heading Err (deg)", Math.toDegrees(e));
         telemetryM.debug("Omega (deg/s)", Math.toDegrees(omega));
         telemetryM.debug("fx, fy", String.format("%.3f, %.3f", fx, fy));
         telemetryM.debug("FlagPassed", FIELD_OR_ROBOT_FLAG);
