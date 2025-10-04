@@ -14,6 +14,20 @@ import dev.nextftc.bindings.BindingManager;
 
 import java.util.function.DoubleSupplier;
 
+/**
+ * Field-centric TeleOp with speed control option using Pedro Pathing.
+ *
+ * <p>This OpMode implements both power-based and velocity-based driving for a
+ * mecanum drivetrain.  In power mode the robot behaves like a standard
+ * field-centric drive: the left stick controls translation and the right
+ * stick controls rotation.  In speed mode the same sticks command target
+ * linear and angular velocities which are converted to wheel RPM using
+ * Pedro's Mecanum constants and commanded via setVelocity.</p>
+ *
+ * <p>The right bumper toggles slow mode.  The left bumper toggles
+ * auto-heading.  The Y button toggles speed mode.  D-pad buttons zero
+ * the robot's heading to cardinal directions.</p>
+ */
 @Configurable
 @TeleOp(name = "FieldCentricSpeedControl", group = "Pedro")
 public class FieldCentricSpeedControl extends OpMode {
@@ -25,7 +39,7 @@ public class FieldCentricSpeedControl extends OpMode {
     // Telemetry
     private TelemetryManager telemetryM;
 
-    // Configurables related to heading behavior
+    // Configurables related to heading behaviour
     public static double MOVE_DEADBAND = 0.08;
     public static double ROT_DEADBAND  = 0.10;
     public static double OMEGA_MAX_RAD = Math.toRadians(180);
@@ -48,7 +62,7 @@ public class FieldCentricSpeedControl extends OpMode {
     private boolean autoHeading = true;
     private boolean prevManualRot = false;
 
-    // Input slew
+    // Input slew limiting
     private double prevLx = 0, prevLy = 0;
     private long lastInputTsNanos = 0;
 
@@ -74,7 +88,8 @@ public class FieldCentricSpeedControl extends OpMode {
 
         long now = System.nanoTime();
         lastInputTsNanos = now;
-        prevLx = 0; prevLy = 0;
+        prevLx = 0;
+        prevLy = 0;
     }
 
     @Override
@@ -89,12 +104,12 @@ public class FieldCentricSpeedControl extends OpMode {
 
         // Bindings
         button(() -> gamepad1.right_bumper).whenBecomesTrue(() -> slowMode = !slowMode);
-        button(() -> gamepad1.left_bumper).whenBecomesTrue(() -> autoHeading = !autoHeading);
-        button(() -> gamepad1.y).whenBecomesTrue(() -> speedMode = !speedMode);
+        button(() -> gamepad1.left_bumper) .whenBecomesTrue(() -> autoHeading = !autoHeading);
+        button(() -> gamepad1.y)           .whenBecomesTrue(() -> speedMode = !speedMode);
 
-        button(() -> gamepad1.dpad_up).whenBecomesTrue(() -> setZeroToDeg(0));
-        button(() -> gamepad1.dpad_left).whenBecomesTrue(() -> setZeroToDeg(90));
-        button(() -> gamepad1.dpad_down).whenBecomesTrue(() -> setZeroToDeg(180));
+        button(() -> gamepad1.dpad_up)   .whenBecomesTrue(() -> setZeroToDeg(0));
+        button(() -> gamepad1.dpad_left) .whenBecomesTrue(() -> setZeroToDeg(90));
+        button(() -> gamepad1.dpad_down) .whenBecomesTrue(() -> setZeroToDeg(180));
         button(() -> gamepad1.dpad_right).whenBecomesTrue(() -> setZeroToDeg(270));
     }
 
@@ -118,7 +133,9 @@ public class FieldCentricSpeedControl extends OpMode {
 
         lx = slew(lx, prevLx, SLEW_RATE_UNITS_PER_S, dtIn);
         ly = slew(ly, prevLy, SLEW_RATE_UNITS_PER_S, dtIn);
-        prevLx = lx; prevLy = ly; lastInputTsNanos = nowInput;
+        prevLx = lx;
+        prevLy = ly;
+        lastInputTsNanos = nowInput;
 
         double psi = getFieldYaw();
         boolean manualRot = Math.abs(rx) > ROT_DEADBAND;
@@ -148,10 +165,10 @@ public class FieldCentricSpeedControl extends OpMode {
         }
 
         // Field to robot transform
-        double cos = Math.cos(psi), sin = Math.sin(psi);
-        double fieldVx = lx, fieldVy = ly;
-        double robotForward = fieldVx * cos + fieldVy * sin;
-        double robotStrafe  = -fieldVx * sin + fieldVy * cos;
+        double cos = Math.cos(psi);
+        double sin = Math.sin(psi);
+        double robotForward = lx * cos + ly * sin;
+        double robotStrafe  = -lx * sin + ly * cos;
 
         double f = slowMode ? slowModeMultiplier : 1.0;
 
@@ -159,25 +176,30 @@ public class FieldCentricSpeedControl extends OpMode {
             // Power control path
             follower.setTeleOpDrive(robotForward * f, robotStrafe * f, omega * f, false);
         } else {
-            // Speed control path using Constants
+            // Velocity control path
             double vxCmd = clamp(robotForward * Constants.Speed.MAX_VEL_MPS * f,
-                    -Constants.Speed.MAX_VEL_MPS, Constants.Speed.MAX_VEL_MPS);
+                                -Constants.Speed.MAX_VEL_MPS,
+                                 Constants.Speed.MAX_VEL_MPS);
             double vyCmd = clamp(robotStrafe  * Constants.Speed.MAX_VEL_MPS * f,
-                    -Constants.Speed.MAX_VEL_MPS, Constants.Speed.MAX_VEL_MPS);
+                                -Constants.Speed.MAX_VEL_MPS,
+                                 Constants.Speed.MAX_VEL_MPS);
             double wzCmd = clamp(omega * f,
-                    -Constants.Speed.MAX_ANG_VEL_RADPS, Constants.Speed.MAX_ANG_VEL_RADPS);
+                                 -Constants.Speed.MAX_ANG_VEL_RADPS,
+                                  Constants.Speed.MAX_ANG_VEL_RADPS);
 
             vxCmd = slew(vxCmd, prevVxCmd, Constants.Speed.LINEAR_SLEW_MPS2, dtIn);
             vyCmd = slew(vyCmd, prevVyCmd, Constants.Speed.LINEAR_SLEW_MPS2, dtIn);
             wzCmd = slew(wzCmd, prevWzCmd, Constants.Speed.ANGULAR_SLEW_RAD2, dtIn);
-            prevVxCmd = vxCmd; prevVyCmd = vyCmd; prevWzCmd = wzCmd;
+            prevVxCmd = vxCmd;
+            prevVyCmd = vyCmd;
+            prevWzCmd = wzCmd;
 
             Constants.MecanumIK.WheelSpeeds ws = Constants.MecanumIK.wheelSpeedsFromChassis(vxCmd, vyCmd, wzCmd);
             Constants.MecanumIK.TicksPerSec tps = ws.toTicksPerSec();
-
             motors.setAllVelocityTps(tps.tFL, tps.tFR, tps.tBL, tps.tBR);
         }
 
+        // Debug telemetry
         telemetryM.debug("Mode", speedMode ? "Speed" : "Power");
         telemetryM.debug("Slow Mode", slowMode);
         telemetryM.debug("AutoHeading", autoHeading);
@@ -194,7 +216,7 @@ public class FieldCentricSpeedControl extends OpMode {
         if (speedMode && motors != null) motors.stop();
     }
 
-    // Helpers
+    // ===== Helpers =====
     private double getFieldYaw() {
         double psiRaw = Math.toRadians(yawDegSupplier.getAsDouble());
         return wrap(psiRaw + yawOffset);
@@ -216,15 +238,18 @@ public class FieldCentricSpeedControl extends OpMode {
         desiredPsi = getFieldYaw();
         lastDesiredPsi = desiredPsi;
     }
-
-    private static double deadband(double v, double d){ return Math.abs(v) < d ? 0 : v; }
-    private static double clamp(double v, double lo, double hi){ return Math.max(lo, Math.min(hi, v)); }
-    private static double wrap(double a){
-        while (a >  Math.PI) a -= 2*Math.PI;
-        while (a < -Math.PI) a += 2*Math.PI;
+    private static double deadband(double v, double d) {
+        return Math.abs(v) < d ? 0 : v;
+    }
+    private static double clamp(double v, double lo, double hi) {
+        return Math.max(lo, Math.min(hi, v));
+    }
+    private static double wrap(double a) {
+        while (a >  Math.PI) a -= 2 * Math.PI;
+        while (a < -Math.PI) a += 2 * Math.PI;
         return a;
     }
-    private static double slew(double target, double prev, double ratePerSec, double dt){
+    private static double slew(double target, double prev, double ratePerSec, double dt) {
         double maxDelta = ratePerSec * dt;
         double delta = clamp(target - prev, -maxDelta, maxDelta);
         return prev + delta;

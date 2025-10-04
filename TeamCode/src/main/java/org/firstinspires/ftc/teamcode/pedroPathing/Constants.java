@@ -17,11 +17,7 @@ import com.qualcomm.robotcore.hardware.HardwareMap;
 
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 
-// Optional: add @Configurable on this class or on individual fields if you want Panels to show them.
-// import com.bylazar.configurables.annotations.Configurable;
-// @Configurable
 public class Constants {
-
     /** Centralized hardware names. Use these everywhere. */
     public static class HardwareNames {
         public static final String LF = "lf";
@@ -42,7 +38,6 @@ public class Constants {
             .secondaryHeadingPIDFCoefficients(new PIDFCoefficients(0, 0, 0.000, 0))
             .drivePIDFCoefficients(new FilteredPIDFCoefficients(0, 0, 0.0, 0, 0))
             .secondaryDrivePIDFCoefficients(new FilteredPIDFCoefficients(0, 0, 0, 0, 0))
-
             .mass(5);
 
     public static MecanumConstants driveConstants = new MecanumConstants()
@@ -56,8 +51,6 @@ public class Constants {
             .rightFrontMotorDirection(DcMotorSimple.Direction.FORWARD)
             .rightRearMotorDirection(DcMotorSimple.Direction.FORWARD)
             .useBrakeModeInTeleOp(true);
-
-
 
     public static PinpointConstants localizerConstants = new PinpointConstants()
             .forwardPodY(3.25)
@@ -79,7 +72,6 @@ public class Constants {
     }
 
     // ========= Speed control configuration and helpers =========
-    // If you want to tune these in Panels, add @Configurable on each static field.
     public static class Speed {
         // Geometry (meters)
         public static double WHEEL_RADIUS_M = 0.048;           // 96 mm diameter
@@ -148,7 +140,6 @@ public class Constants {
 
     /** Mecanum inverse kinematics. Inputs are robot frame: vx forward, vy left, wz CCW. */
     public static class MecanumIK {
-
         public static WheelSpeeds wheelSpeedsFromChassis(double vx, double vy, double wz) {
             double k = Speed.kYaw();
             double vFL = vx + vy - k * wz;

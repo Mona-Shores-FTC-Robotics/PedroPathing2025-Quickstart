@@ -21,6 +21,7 @@ public class FlywheelSubsystem {
     private double lastPosTicks = 0.0;
     private double lastRpm = 0.0;
     private double targetRpm = 0.0;
+    private double lastPower = 0.0;
 
     /**
      * Construct a FlywheelSubsystem.  The motor is looked up by the name
@@ -63,6 +64,15 @@ public class FlywheelSubsystem {
     }
 
     /**
+     * Returns the last motor power that was applied by {@link #controlLoopOnce()}.
+     * This is useful for logging and telemetry.  Values are clipped between 0
+     * and {@link Constants#FLY_MAX_POWER}.
+     */
+    public double getLastPower() {
+        return lastPower;
+    }
+
+    /**
      * Run one iteration of the bang‑bang + feedforward + P control loop.  This
      * should be called once per OpMode loop.  It reads the current speed,
      * computes a new motor power and applies it.
@@ -90,6 +100,7 @@ public class FlywheelSubsystem {
         // Clamp the output to the allowed range and set the motor power
         out = Math.max(0.0, Math.min(Constants.FLY_MAX_POWER, out));
         motor.setPower(out);
+        lastPower = out;
     }
 
     /** Stop the flywheel by setting the target RPM to zero and zeroing power. */

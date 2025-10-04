@@ -22,7 +22,9 @@ public class AutoSimpleRed extends LinearOpMode {
     @Override
     public void runOpMode() throws InterruptedException {
         DriveSubsystem drive = new DriveSubsystem(hardwareMap);
-        TelemetryPublisher pub = new TelemetryPublisher();
+        org.firstinspires.ftc.teamcode.util.PsiKitAdapter logger = new org.firstinspires.ftc.teamcode.util.PsiKitAdapter();
+        logger.startSession();
+        TelemetryPublisher pub = new TelemetryPublisher(logger);
 
         // Starting pose for the red alliance.  X coordinate mirrored relative
         // to blue start.  Adjust values to match your field coordinate system.
@@ -42,6 +44,9 @@ public class AutoSimpleRed extends LinearOpMode {
 
         // Brief pause
         sleep(300);
+
+        // Stop logging
+        logger.stopSession();
     }
 
     /**

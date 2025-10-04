@@ -1,4 +1,3 @@
-// Rest-on-release auto-heading with clean handoffs and no proportional hold at rest.
 package org.firstinspires.ftc.teamcode.pedroPathing;
 
 import static dev.nextftc.bindings.Bindings.button;
@@ -114,7 +113,6 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         long now = System.nanoTime();
         lastInputTsNanos = now;
         prevFx = 0; prevFy = 0;
-
     }
 
     @Override
@@ -159,8 +157,6 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
 
         // === Publish pose to AdvantageScope via FTC Dashboard ===
         Pose p = follower.getPose();
-
-// Pedro Pathing tutorials and tuners commonly use inches. If your pose is in meters, convert.
         double xIn = p.getX();
         double yIn = p.getY();
         if (POSE_IS_METERS) { // set this flag if your pose is meters
@@ -169,20 +165,16 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
             yIn *= M_TO_IN;
         }
 
-// Your follower heading is already radians in your code.
+        // Your follower heading is already radians in your code.
         double headingRad = follower.getHeading();
 
         TelemetryPacket packet = new TelemetryPacket();
         packet.put("Pose x", xIn);            // inches
         packet.put("Pose y", yIn);            // inches
         packet.put("Pose heading", headingRad); // radians
-// If you prefer degrees instead, publish this line instead of the radians line:
-// packet.put("Pose heading (deg)", Math.toDegrees(headingRad));
-
+        // If you prefer degrees instead, publish this line instead of the radians line:
+        // packet.put("Pose heading (deg)", Math.toDegrees(headingRad));
         dash.sendTelemetryPacket(packet);
-
-
-
 
         telemetryM.update();
 

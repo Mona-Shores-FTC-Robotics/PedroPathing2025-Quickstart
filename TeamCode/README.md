@@ -31,6 +31,28 @@ Constants.DEV_SIM_ENABLED = false;
 
 or change the default value in `Constants.java`.  When DevSim is off, be sure to implement your real odometry updates in `DriveSubsystem.updateOdometryDevSim()`.
 
+## Live Tuning via FTC Dashboard
+
+This scaffold marks the `Constants` class with `@Config` from the FTC Dashboard library.  All non‑final public static fields (such as `HEADING_KP`, `SLOW_MODE_SCALE`, `FLY_KF`, etc.) become editable on the **Config** tab of the dashboard.  Use this feature to adjust gains and thresholds without redeploying your code.  Changes take effect immediately and persist until the next app restart.
+
+## Logging
+
+### Live Telemetry
+
+`TelemetryPublisher` sends values to the FTC Dashboard on every loop.  You can monitor:
+
+* `drive_lx`, `drive_ly`, `drive_rx` — joystick commands
+* `drive_x_in`, `drive_y_in`, `drive_heading_deg` — robot pose estimates (inches and degrees)
+* `fly_target_rpm`, `fly_rpm`, `fly_err`, `fly_power` — target flywheel speed, measured speed, error and applied motor power
+
+Plots and tables of these values are available in the dashboard and AdvantageScope when connected live.
+
+### Persistent Logs (PsiKit Adapter)
+
+For offline analysis, the scaffold includes a `PsiKitAdapter` that writes all telemetry to a CSV file on the robot.  A new log file is created when an OpMode is initialised and closed when it stops.  Files are saved under `/sdcard/FIRST/PsiKitLogs` with names like `log_20251004_153000.csv`.  Each row contains a timestamp, a key and a value.  You can drag these CSV files into AdvantageScope and replay your runs.  Because the adapter matches the same keys used for live telemetry, you will see identical graphs.
+
+If you later choose to integrate the official PsiKit library, you can replace the simple adapter with the real implementation without changing the rest of your code.
+
 ## FTC Dashboard and AdvantageScope
 
 The scaffold includes the FTC Dashboard library (`ftc-dashboard 0.4.8`).  To view telemetry:
