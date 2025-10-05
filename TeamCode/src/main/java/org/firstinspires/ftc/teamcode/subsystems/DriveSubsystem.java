@@ -39,7 +39,7 @@ public class DriveSubsystem {
     private final DcMotorEx fr;
     private final DcMotorEx bl;
     private final DcMotorEx br;
-    //
+
     private BNO055IMU imu;
     private boolean slowMode = false;
     private Pose2d pose = new Pose2d(0, 0, 0);

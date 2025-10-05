@@ -19,6 +19,7 @@ public class FieldCentricTeleOp extends OpMode {
     private DriveSubsystem drive;
     private FlywheelSubsystem fly;
     private TelemetryPublisher pub;
+    private org.firstinspires.ftc.teamcode.util.PsiKitAdapter logger;
 
     // Flywheel toggling: track whether the flywheel is currently commanded on
     private boolean flyOn = false;
@@ -27,7 +28,13 @@ public class FieldCentricTeleOp extends OpMode {
     public void init() {
         drive = new DriveSubsystem(hardwareMap);
         fly   = new FlywheelSubsystem(hardwareMap);
-        pub   = new TelemetryPublisher();
+        // Start logging: create a PsiKit adapter and start a session.  The
+        // logger writes a CSV file to the SD card that can be opened in
+        // AdvantageScope.  Passing the logger to the publisher will cause all
+        // telemetry to be recorded to the file as well as sent to the dashboard.
+        logger = new org.firstinspires.ftc.teamcode.util.PsiKitAdapter();
+        logger.startSession();
+        pub   = new TelemetryPublisher(logger);
         // Set an initial pose for telemetry.  Modify as appropriate for your field.
         drive.setPose(0.0, 0.0, 0.0);
     }
@@ -59,11 +66,10 @@ public class FieldCentricTeleOp extends OpMode {
 
         // Publish telemetry to FTC Dashboard
         pub.publishDrive(drive, lx, ly, rx, slowHold);
-        // We do not compute or pass the actual flywheel power here; the subsystem
-        // clamps internally.  Instead publish the current error.
+        // Flywheel telemetry: include the last power applied by the control loop
         double rpm = fly.getRpm();
         double err = fly.getTargetRpm() - rpm;
-        pub.publishFlywheel(fly.getTargetRpm(), rpm, /*power*/0.0, err);
+        pub.publishFlywheel(fly.getTargetRpm(), rpm, fly.getLastPower(), err);
 
         // Also show basic telemetry on the driver station phone
         telemetry.addData("slowMode", slowHold);
@@ -78,6 +84,9 @@ public class FieldCentricTeleOp extends OpMode {
     public void stop() {
         if (fly != null) {
             fly.stop();
+        }
+        if (logger != null) {
+            logger.stopSession();
         }
     }
 }

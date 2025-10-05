@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode.util;
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
+import org.firstinspires.ftc.teamcode.util.PsiKitAdapter;
 
 /**
  * TelemetryPublisher centralises the construction of telemetry packets for the
@@ -16,6 +17,26 @@ import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 public class TelemetryPublisher {
 
     private final FtcDashboard dash = FtcDashboard.getInstance();
+    private final PsiKitAdapter logger;
+
+    /**
+     * Creates a TelemetryPublisher.  If a {@link PsiKitAdapter} is provided the
+     * publisher will log all values to a CSV file in addition to sending them
+     * to the FTC Dashboard.  Passing {@code null} disables file logging.
+     *
+     * @param logger an optional logger for persistent recordings
+     */
+    public TelemetryPublisher(PsiKitAdapter logger) {
+        this.logger = logger;
+    }
+
+    /**
+     * Convenience constructor that does not record to a file.  Only live
+     * dashboard telemetry will be produced.
+     */
+    public TelemetryPublisher() {
+        this(null);
+    }
 
     /**
      * Publish drivetrain telemetry to the dashboard.  Includes joystick inputs,
@@ -41,7 +62,19 @@ public class TelemetryPublisher {
         p.put("y_in", pose.y);
         p.put("heading_deg", Math.toDegrees(pose.headingRad));
 
+        // Send to the live dashboard
         dash.sendTelemetryPacket(p);
+
+        // Record to persistent log if enabled
+        if (logger != null) {
+            logger.recordNumber("drive_lx", lx);
+            logger.recordNumber("drive_ly", ly);
+            logger.recordNumber("drive_rx", rx);
+            logger.recordBoolean("drive_slowMode", slowMode);
+            logger.recordNumber("drive_x_in", pose.x);
+            logger.recordNumber("drive_y_in", pose.y);
+            logger.recordNumber("drive_heading_deg", Math.toDegrees(pose.headingRad));
+        }
     }
 
     /**
@@ -60,5 +93,13 @@ public class TelemetryPublisher {
         p.put("fly_err", error);
         p.put("fly_power", power);
         dash.sendTelemetryPacket(p);
+        if (logger != null) {
+            logger.recordNumber("fly_target_rpm", targetRpm);
+            logger.recordNumber("fly_rpm", rpm);
+            logger.recordNumber("fly_err", error);
+            logger.recordNumber("fly_power", power);
+            // Flush immediately to minimise data loss if the robot shuts down
+            logger.flush();
+        }
     }
 }

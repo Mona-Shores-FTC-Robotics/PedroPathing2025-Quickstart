@@ -20,7 +20,11 @@ public class AutoSimpleBlue extends LinearOpMode {
     @Override
     public void runOpMode() throws InterruptedException {
         DriveSubsystem drive = new DriveSubsystem(hardwareMap);
-        TelemetryPublisher pub = new TelemetryPublisher();
+        // Create a PsiKit logger to record the autonomous run.  The log file
+        // will be stored in /sdcard/FIRST/PsiKitLogs.
+        org.firstinspires.ftc.teamcode.util.PsiKitAdapter logger = new org.firstinspires.ftc.teamcode.util.PsiKitAdapter();
+        logger.startSession();
+        TelemetryPublisher pub = new TelemetryPublisher(logger);
 
         // Starting pose for blue alliance.  Adjust as needed.
         drive.setPose(-12.0, -60.0, Math.toRadians(90.0));
@@ -39,6 +43,9 @@ public class AutoSimpleBlue extends LinearOpMode {
 
         // Small pause at the end
         sleep(300);
+
+        // End logging session
+        logger.stopSession();
     }
 
     /**
