@@ -4,17 +4,9 @@ import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.util.ElapsedTime;
 import org.firstinspires.ftc.teamcode.Constants;
+import dev.nextftc.core.subsystems.Subsystem;
 
-/**
- * FlywheelSubsystem controls a high‑speed shooter wheel using a combination
- * of bang‑bang, feedforward and proportional control.  The control logic
- * is run once per loop via {@link #controlLoopOnce()} and does not start its
- * own thread.
- *
- * <p>Use {@link #setTargetRpm(double)} to set the desired wheel speed.
- * Calling {@link #stop()} will set the target to zero and power down the motor.</p>
- */
-public class FlywheelSubsystem {
+public class FlywheelSubsystem implements Subsystem {
 
     private final DcMotorEx motor;
     private final ElapsedTime loopTimer = new ElapsedTime();
@@ -23,11 +15,6 @@ public class FlywheelSubsystem {
     private double targetRpm = 0.0;
     private double lastPower = 0.0;
 
-    /**
-     * Construct a FlywheelSubsystem.  The motor is looked up by the name
-     * "flywheel" in the hardware map.  Change this if your configuration uses
-     * a different name.
-     */
     public FlywheelSubsystem(HardwareMap hw) {
         motor = hw.get(DcMotorEx.class, "flywheel");
         motor.setZeroPowerBehavior(DcMotorEx.ZeroPowerBehavior.FLOAT);
@@ -36,17 +23,12 @@ public class FlywheelSubsystem {
         loopTimer.reset();
     }
 
-    /** Set the desired RPM for the flywheel.  Passing a value ≤ 0 stops the wheel. */
-    public void setTargetRpm(double rpm) {
-        this.targetRpm = Math.max(0.0, rpm);
-    }
+    // ===== Public API used by Commands =====
+    public void setTargetRpm(double rpm) { this.targetRpm = Math.max(0.0, rpm); }
+    public double getTargetRpm()          { return targetRpm; }
+    public double getLastPower()          { return lastPower; }
 
-    /** Returns the current target RPM. */
-    public double getTargetRpm() {
-        return targetRpm;
-    }
-
-    /** Compute and return the current measured RPM using encoder ticks. */
+    /** Returns the current measured RPM using encoder ticks. */
     public double getRpm() {
         double dt = Math.max(1e-3, loopTimer.seconds());
         loopTimer.reset();
@@ -54,30 +36,20 @@ public class FlywheelSubsystem {
         double dTicks = pos - lastPosTicks;
         lastPosTicks = pos;
 
-        // Convert ticks per dt to RPM
         double revs = dTicks / Constants.TICKS_PER_REV;
         double rpm = revs / dt * 60.0;
 
-        // Simple smoothing to reduce measurement noise
-        lastRpm = 0.7 * lastRpm + 0.3 * rpm;
+        lastRpm = 0.7 * lastRpm + 0.3 * rpm; // EMA smoothing
         return lastRpm;
     }
 
-    /**
-     * Returns the last motor power that was applied by {@link #controlLoopOnce()}.
-     * This is useful for logging and telemetry.  Values are clipped between 0
-     * and {@link Constants#FLY_MAX_POWER}.
-     */
-    public double getLastPower() {
-        return lastPower;
+    public void stop() {
+        targetRpm = 0.0;
+        motor.setPower(0.0);
     }
 
-    /**
-     * Run one iteration of the bang‑bang + feedforward + P control loop.  This
-     * should be called once per OpMode loop.  It reads the current speed,
-     * computes a new motor power and applies it.
-     */
-    public void controlLoopOnce() {
+    // ===== Subsystem lifecycle (NextFTC scheduler calls this) =====
+    @Override public void periodic() {
         double rpm = getRpm();
         double err = targetRpm - rpm;
         double out;
@@ -85,27 +57,17 @@ public class FlywheelSubsystem {
         if (targetRpm <= 0.0) {
             out = 0.0;
         } else if (rpm < targetRpm - Constants.FLY_BB_THRESH_RPM) {
-            // Far below target: slam full power
-            out = Constants.FLY_MAX_POWER;
+            out = Constants.FLY_MAX_POWER;               // bang-bang: boost up
         } else if (rpm > targetRpm + Constants.FLY_BB_THRESH_RPM) {
-            // Above target: cut power to let it coast down
-            out = 0.0;
+            out = 0.0;                                   // bang-bang: coast down
         } else {
-            // Near target: feedforward plus proportional trim
-            double ff = Constants.FLY_KF * targetRpm;
-            double p = Constants.FLY_KP * err;
+            double ff = Constants.FLY_KF * targetRpm;    // feedforward
+            double p  = Constants.FLY_KP * err;          // proportional trim
             out = ff + p;
         }
 
-        // Clamp the output to the allowed range and set the motor power
         out = Math.max(0.0, Math.min(Constants.FLY_MAX_POWER, out));
         motor.setPower(out);
         lastPower = out;
-    }
-
-    /** Stop the flywheel by setting the target RPM to zero and zeroing power. */
-    public void stop() {
-        targetRpm = 0.0;
-        motor.setPower(0.0);
     }
 }

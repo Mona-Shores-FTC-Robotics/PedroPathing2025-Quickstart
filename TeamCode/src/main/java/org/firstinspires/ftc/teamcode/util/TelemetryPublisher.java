@@ -3,7 +3,6 @@ package org.firstinspires.ftc.teamcode.util;
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
-import org.firstinspires.ftc.teamcode.util.PsiKitAdapter;
 
 /**
  * TelemetryPublisher centralises the construction of telemetry packets for the
