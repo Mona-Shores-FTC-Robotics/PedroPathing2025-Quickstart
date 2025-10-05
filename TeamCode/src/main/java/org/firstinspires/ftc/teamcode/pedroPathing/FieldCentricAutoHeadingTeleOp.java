@@ -20,7 +20,8 @@ import dev.nextftc.bindings.BindingManager;
 /**
  * Field-centric mecanum TeleOp with auto-heading toward the left-stick direction.
  * 0 deg = away from the alliance wall. Right stick overrides rotation.
- * Precision Mode (RB held) suppresses auto-heading for clean strafes.
+ * Precision Mode (LB held) suppresses auto-heading for clean strafes, NO speed scaling.
+ * Slow Mode (RB held) suppresses auto-heading for clean strafes, WITH speed scaling.
  * SDK: 11.0.0, PedroPathing: 2.0.2
  */
 @Configurable
@@ -45,8 +46,8 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
     public static double SLEW_RATE_UNITS_PER_S = 3.0;          // left-stick rate limit 0..1/s
     public static double DIR_RESET_DEG = 11;                   // reset path distance if desired heading jumps
 
-    // Precision Mode scale while right bumper is held
-    public static double PRECISION_MULTIPLIER = 0.40;          // scales both translation and rotation
+    // Slow Mode scale while right bumper is held
+    public static double PRECISION_MULTIPLIER = 0.40;          // scales both translation and rotation (RB only)
 
     // Manual override and auto-heading rearm
     public static double AUTOHEADING_REARM_TIME_S = 0.35;
@@ -76,7 +77,9 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
     private double sSinceDirChange = 0;    // meters
     private Pose   lastPose;
 
-    private boolean precisionMode = false;
+    // Two separate modes
+    private boolean precisionMode = false; // LB
+    private boolean slowMode      = false; // RB
 
     private boolean prevMoving = false;
     private boolean prevManualRot = false;
@@ -126,17 +129,31 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         lastDesiredPsi = desiredPsi;
         sSinceDirChange = 0;
 
-        // Precision Mode while RIGHT BUMPER is held
+        // ====== Mode bindings ======
+        // Slow Mode on RIGHT bumper (RB): suppress auto-heading + speed scaling
         button(() -> gamepad1.right_bumper)
                 .whenBecomesTrue(() -> {
-                    precisionMode = true;
+                    slowMode = true;
                     // Snap reference on entry for clean handoff
                     desiredPsi = getFieldYaw();
                     lastDesiredPsi = desiredPsi;
                 })
                 .whenBecomesFalse(() -> {
-                    precisionMode = false;
+                    slowMode = false;
                     // Keep reference equal to current on exit to avoid a jump
+                    desiredPsi = getFieldYaw();
+                    lastDesiredPsi = desiredPsi;
+                });
+
+        // Precision Mode on LEFT bumper (LB): suppress auto-heading, NO speed scaling
+        button(() -> gamepad1.left_bumper)
+                .whenBecomesTrue(() -> {
+                    precisionMode = true;
+                    desiredPsi = getFieldYaw();
+                    lastDesiredPsi = desiredPsi;
+                })
+                .whenBecomesFalse(() -> {
+                    precisionMode = false;
                     desiredPsi = getFieldYaw();
                     lastDesiredPsi = desiredPsi;
                 });
@@ -165,16 +182,14 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
             yIn *= M_TO_IN;
         }
 
-        // Your follower heading is already radians in your code.
         double headingRad = follower.getHeading();
 
         TelemetryPacket packet = new TelemetryPacket();
-        packet.put("Pose x", xIn);            // inches
-        packet.put("Pose y", yIn);            // inches
+        packet.put("Pose x", xIn);              // inches
+        packet.put("Pose y", yIn);              // inches
         packet.put("Pose heading", headingRad); // radians
-        // If you prefer degrees instead, publish this line instead of the radians line:
         // packet.put("Pose heading (deg)", Math.toDegrees(headingRad));
-        dash.sendTelemetryPacket(packet);
+        FtcDashboard.getInstance().sendTelemetryPacket(packet);
 
         telemetryM.update();
 
@@ -210,6 +225,9 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         boolean isMoving = mag > MOVE_DEADBAND;
         boolean manualRot = Math.abs(rxRaw) > MANUAL_OVERRIDE_THRESH;
 
+        // Combined “suppress auto-heading” flag from either mode
+        boolean modeSuppress = slowMode || precisionMode;
+
         // Detect edges for rest logic
         boolean justStopped        =  prevMoving && !isMoving && !manualRot;
         boolean justReleasedRot    =  prevManualRot && !manualRot && !isMoving;
@@ -232,8 +250,8 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
             // Manual rotation: driver owns heading. Track actual for clean handoff.
             desiredPsi = psi;
             autoHeadingRearmT = AUTOHEADING_REARM_TIME_S;
-        } else if (isMoving && !precisionMode && autoHeadingRearmT == 0) {
-            // Auto-heading only while translating and not in precision mode
+        } else if (isMoving && !modeSuppress && autoHeadingRearmT == 0) {
+            // Auto-heading only while translating and not in a suppressing mode
             desiredPsi = Math.atan2(fy, fx);
         } else if (!isMoving && !manualRot) {
             // Resting: desiredPsi already snapped on entry. Optionally snap again if drift grows large.
@@ -254,8 +272,8 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         double omega;
         if (manualRot){
             omega = rx * OMEGA_MAX_RAD; // manual only
-        } else if (precisionMode){
-            // Precision Mode suppresses auto-heading; rotation is manual only
+        } else if (modeSuppress){
+            // Both modes suppress auto-heading; rotation is manual only
             omega = 0.0; // rx already zero here due to manualRot branch
         } else if (isMoving){
             double v = mag; // proxy for speed from stick magnitude
@@ -265,8 +283,8 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
             omega = 0.0;
         }
 
-        // One slow factor, held on RB
-        double f = precisionMode ? PRECISION_MULTIPLIER : 1.0;
+        // Speed multiplier: RB (slowMode) applies scaling; LB (precisionMode) does NOT
+        double f = slowMode ? PRECISION_MULTIPLIER : 1.0;
 
         // Drive
         follower.setTeleOpDrive(fx * f, fy * f, omega * f, FIELD_OR_ROBOT_FLAG);
@@ -276,7 +294,9 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         prevManualRot = manualRot;
 
         // Debug telemetry
-        telemetryM.debug("PrecisionMode(RB held)", precisionMode);
+        telemetryM.debug("PrecisionMode (LB)", precisionMode);
+        telemetryM.debug("SlowMode (RB)", slowMode);
+        telemetryM.debug("AutoHeadingSuppressed", modeSuppress);
         telemetryM.debug("AutoHeadingRearm(s)", autoHeadingRearmT);
         telemetryM.debug("InRest", inRest);
         telemetryM.debug("RestArmingT(s)", restArmingT);

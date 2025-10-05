@@ -46,10 +46,10 @@ public class TeleopBindings {
         driverBindings.add(new BindingEntry("Driver A: toggle flywheel", flyToggle));
 
         // Toggle slow mode on right bumper (press once to engage, again to disengage).
-        Button slowModeToggle = driver.rightBumper().toggleOnBecomesTrue();
-        slowModeToggle.whenBecomesTrue(() -> robot.drive.setSlowMode(true));
-        slowModeToggle.whenBecomesFalse(() -> robot.drive.setSlowMode(false));
-        driverBindings.add(new BindingEntry("Driver RB: toggle slow mode", slowModeToggle));
+//        Button slowModeToggle = driver.rightBumper().toggleOnBecomesTrue();
+//        slowModeToggle.whenBecomesTrue(() -> robot.drive.setSlowMode(true));
+//        slowModeToggle.whenBecomesFalse(() -> robot.drive.setSlowMode(false));
+//        driverBindings.add(new BindingEntry("Driver RB: toggle slow mode", slowModeToggle));
 
         // Help toggle for driver: use the Options button to show/hide driver controls.
         Button driverHelpToggle = driver.options().toggleOnBecomesTrue();
