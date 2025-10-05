@@ -1,7 +1,10 @@
-package org.firstinspires.ftc.teamcode.flywheel;
+package org.firstinspires.ftc.teamcode.deprecated;
 
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
+
+import org.firstinspires.ftc.teamcode.flywheel.FlywheelConfig;
+import org.firstinspires.ftc.teamcode.flywheel.FlywheelLogSink;
 
 /**
  * Sends a small packet to FTC Dashboard at ~N Hz.

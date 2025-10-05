@@ -5,6 +5,9 @@ import com.bylazar.telemetry.TelemetryManager;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
+import org.firstinspires.ftc.teamcode.deprecated.DashboardLogSink;
+import org.firstinspires.ftc.teamcode.deprecated.WpiLogSink;
+
 /**
  * Flywheel tuner OpMode with:
  *  - 200 Hz custom PIDF control (separate thread)

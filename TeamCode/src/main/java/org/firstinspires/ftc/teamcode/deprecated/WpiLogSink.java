@@ -1,4 +1,6 @@
-package org.firstinspires.ftc.teamcode.flywheel;
+package org.firstinspires.ftc.teamcode.deprecated;
+
+import org.firstinspires.ftc.teamcode.flywheel.FlywheelLogSink;
 
 /**
  * Stub for persistent logging to AdvantageScope-replayable formats (e.g., .wpilog).
