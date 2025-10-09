@@ -2,6 +2,10 @@ package org.firstinspires.ftc.teamcode.util;
 
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
+
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 import org.firstinspires.ftc.teamcode.subsystems.DriveSubsystem;
 
 /**
@@ -56,10 +60,10 @@ public class TelemetryPublisher {
         p.put("rx", rx);
         p.put("slowMode", slowMode);
 
-        DriveSubsystem.Pose2d pose = drive.getPose();
-        p.put("x_in", pose.x);
-        p.put("y_in", pose.y);
-        p.put("heading_deg", Math.toDegrees(pose.headingRad));
+        Pose2D pose = drive.getPose();
+        p.put("x_in", pose.getX(DistanceUnit.INCH));
+        p.put("y_in", pose.getY(DistanceUnit.INCH));
+        p.put("heading_deg", Math.toDegrees(pose.getHeading(AngleUnit.RADIANS)));
 
         // Send to the live dashboard
         dash.sendTelemetryPacket(p);
@@ -70,9 +74,9 @@ public class TelemetryPublisher {
             logger.recordNumber("drive_ly", ly);
             logger.recordNumber("drive_rx", rx);
             logger.recordBoolean("drive_slowMode", slowMode);
-            logger.recordNumber("drive_x_in", pose.x);
-            logger.recordNumber("drive_y_in", pose.y);
-            logger.recordNumber("drive_heading_deg", Math.toDegrees(pose.headingRad));
+            logger.recordNumber("drive_x_in", pose.getX(DistanceUnit.INCH));
+            logger.recordNumber("drive_y_in", pose.getY(DistanceUnit.INCH));
+            logger.recordNumber("drive_heading_deg", Math.toDegrees(pose.getHeading(AngleUnit.RADIANS)));
         }
     }
 

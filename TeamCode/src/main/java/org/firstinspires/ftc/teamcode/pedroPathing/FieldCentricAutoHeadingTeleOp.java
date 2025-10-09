@@ -20,8 +20,8 @@ import dev.nextftc.bindings.BindingManager;
 /**
  * Field-centric mecanum TeleOp with auto-heading toward the left-stick direction.
  * 0 deg = away from the alliance wall. Right stick overrides rotation.
- * Precision Mode (LB held) suppresses auto-heading for clean strafes, NO speed scaling.
- * Slow Mode (RB held) suppresses auto-heading for clean strafes, WITH speed scaling.
+ * Precision Mode (LB held) suppresses auto-heading, no speed scaling.
+ * Slow Mode (RB held) suppresses auto-heading, with speed scaling.
  * SDK: 11.0.0, PedroPathing: 2.0.2
  */
 @Configurable
@@ -67,6 +67,19 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
     public static boolean INVERT_ROT_STICK = false;            // flip right stick rotation if needed
     public static boolean NEGATE_FIELD_YAW = false;            // negate psi if IMU heading sign is opposite
 
+    // ===== Zero snap so BRAKE can engage =====
+    public static double ZERO_SNAP = 0.02;                     // commands with magnitude < ZERO_SNAP go to exactly 0
+
+    // ===== Active braking (translation + rotation) =====
+    public static boolean ENABLE_ACTIVE_BRAKE   = true;
+    public static double  VEL_DEADBAND_MPS      = 0.02;        // ignore tiny drift
+    public static double  K_BRAKE                = 0.60;        // gain from velocity to stick units
+    public static double  MAX_BRAKE_STICK        = 0.35;        // cap per axis
+
+    public static boolean ENABLE_ANGULAR_BRAKE  = true;
+    public static double  OMEGA_DEADBAND_RADPS  = Math.toRadians(2.0);
+    public static double  K_OMEGA_BRAKE          = 0.60;        // maps rad/s to fraction of OMEGA_MAX_RAD
+
     // ===== Yaw source (Pinpoint preferred) =====
     private DoubleSupplier yawDegSupplier; // returns degrees
 
@@ -76,6 +89,10 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
     private double lastDesiredPsi = 0;     // radians
     private double sSinceDirChange = 0;    // meters
     private Pose   lastPose;
+
+    // For velocity and spin estimation
+    private double lastHeading;            // radians
+    private long   lastKinematicsNs;       // nanoseconds
 
     // Two separate modes
     private boolean precisionMode = false; // LB
@@ -108,6 +125,9 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         follower.setStartingPose(startingPose == null ? new Pose() : startingPose);
         follower.update();
         lastPose = follower.getPose();
+        lastHeading = follower.getHeading();
+        lastKinematicsNs = System.nanoTime();
+
         telemetryM = PanelsTelemetry.INSTANCE.getTelemetry();
 
         // Default yaw provider uses Pedro heading
@@ -134,18 +154,16 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         button(() -> gamepad1.right_bumper)
                 .whenBecomesTrue(() -> {
                     slowMode = true;
-                    // Snap reference on entry for clean handoff
                     desiredPsi = getFieldYaw();
                     lastDesiredPsi = desiredPsi;
                 })
                 .whenBecomesFalse(() -> {
                     slowMode = false;
-                    // Keep reference equal to current on exit to avoid a jump
                     desiredPsi = getFieldYaw();
                     lastDesiredPsi = desiredPsi;
                 });
 
-        // Precision Mode on LEFT bumper (LB): suppress auto-heading, NO speed scaling
+        // Precision Mode on LEFT bumper (LB): suppress auto-heading, no speed scaling
         button(() -> gamepad1.left_bumper)
                 .whenBecomesTrue(() -> {
                     precisionMode = true;
@@ -188,7 +206,6 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         packet.put("Pose x", xIn);              // inches
         packet.put("Pose y", yIn);              // inches
         packet.put("Pose heading", headingRad); // radians
-        // packet.put("Pose heading (deg)", Math.toDegrees(headingRad));
         FtcDashboard.getInstance().sendTelemetryPacket(packet);
 
         telemetryM.update();
@@ -236,7 +253,6 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
 
         // Handle rest entry and exit
         if (enteringRest) {
-            // Snap reference to current to ensure zero error on the rest frame
             desiredPsi = psi;
             restArmingT = 0.0;
             inRest = true;
@@ -247,17 +263,14 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
 
         // Determine desired heading based on mode
         if (manualRot) {
-            // Manual rotation: driver owns heading. Track actual for clean handoff.
             desiredPsi = psi;
             autoHeadingRearmT = AUTOHEADING_REARM_TIME_S;
         } else if (isMoving && !modeSuppress && autoHeadingRearmT == 0) {
-            // Auto-heading only while translating and not in a suppressing mode
             desiredPsi = Math.atan2(fy, fx);
         } else if (!isMoving && !manualRot) {
-            // Resting: desiredPsi already snapped on entry. Optionally snap again if drift grows large.
             double err = Math.toDegrees(Math.abs(wrap(desiredPsi - psi)));
             if (restArmingT >= REST_ARM_TIME_S && err >= DRIFT_TAKEOVER_DEG) {
-                desiredPsi = psi; // one-time snap to kill accumulated drift
+                desiredPsi = psi;
             }
         }
 
@@ -273,21 +286,63 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         if (manualRot){
             omega = rx * OMEGA_MAX_RAD; // manual only
         } else if (modeSuppress){
-            // Both modes suppress auto-heading; rotation is manual only
-            omega = 0.0; // rx already zero here due to manualRot branch
+            omega = 0.0; // rotation suppressed in both modes
         } else if (isMoving){
-            double v = mag; // proxy for speed from stick magnitude
+            double v = mag; // proxy from stick magnitude
             omega = clamp(v * e / L_CONV_M, -OMEGA_MAX_RAD, OMEGA_MAX_RAD);
         } else {
-            // Rest means rest: no proportional hold when stopped
             omega = 0.0;
         }
 
-        // Speed multiplier: RB (slowMode) applies scaling; LB (precisionMode) does NOT
+        // ===== Measured velocities (field frame) for active braking =====
+        long nowKin = System.nanoTime();
+        double dtKin = (nowKin - lastKinematicsNs) / 1e9; if (dtKin <= 0) dtKin = 1e-3;
+
+        Pose pNow = follower.getPose();
+        double vx = (pNow.getX() - lastPose.getX()) / dtKin;  // forward +, units per second
+        double vy = (pNow.getY() - lastPose.getY()) / dtKin;  // left    +
+        double headingNow = follower.getHeading();
+        double omegaMeas = wrap(headingNow - lastHeading) / dtKin; // rad/s
+
+        lastPose = pNow;
+        lastHeading = headingNow;
+        lastKinematicsNs = nowKin;
+
+        // Speed multiplier: RB (slowMode) applies scaling; LB (precisionMode) does not
         double f = slowMode ? PRECISION_MULTIPLIER : 1.0;
 
+        // ===== Active braking when the driver is not commanding =====
+        boolean driverReleased = !isMoving && !manualRot;
+
+        double fxBrake = 0, fyBrake = 0, omegaBrake = 0;
+
+        if (ENABLE_ACTIVE_BRAKE && driverReleased) {
+            double vMag = Math.hypot(vx, vy);
+            if (vMag > VEL_DEADBAND_MPS) {
+                // Oppose measured velocity. Units agnostic. Tune K_BRAKE empirically if pose is inches.
+                fxBrake = clamp(-K_BRAKE * vx, -MAX_BRAKE_STICK, MAX_BRAKE_STICK);
+                fyBrake = clamp(-K_BRAKE * vy, -MAX_BRAKE_STICK, MAX_BRAKE_STICK);
+            }
+        }
+
+        if (ENABLE_ANGULAR_BRAKE && driverReleased && Math.abs(omegaMeas) > OMEGA_DEADBAND_RADPS) {
+            // Map measured spin to a fraction of OMEGA_MAX_RAD, then oppose it
+            double omegaFrac = clamp(-K_OMEGA_BRAKE * (omegaMeas / OMEGA_MAX_RAD), -1.0, 1.0);
+            omegaBrake = omegaFrac * OMEGA_MAX_RAD;
+        }
+
+        // Compose final commands
+        double fxCmd = (fx * f) + fxBrake;
+        double fyCmd = (fy * f) + fyBrake;
+        double omegaCmd = (omega * f) + omegaBrake;
+
+        // Snap tiny values to exactly zero so ZeroPowerBehavior.BRAKE can engage
+        fxCmd = snapZero(fxCmd, ZERO_SNAP);
+        fyCmd = snapZero(fyCmd, ZERO_SNAP);
+        omegaCmd = snapZero(omegaCmd, ZERO_SNAP);
+
         // Drive
-        follower.setTeleOpDrive(fx * f, fy * f, omega * f, FIELD_OR_ROBOT_FLAG);
+        follower.setTeleOpDrive(fxCmd, fyCmd, omegaCmd, FIELD_OR_ROBOT_FLAG);
 
         // Bookkeeping
         prevMoving = isMoving;
@@ -303,10 +358,10 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         telemetryM.debug("Field Yaw (deg)", Math.toDegrees(psi));
         telemetryM.debug("Desired Yaw (deg)", Math.toDegrees(desiredPsi));
         telemetryM.debug("Heading Err (deg)", Math.toDegrees(e));
-        telemetryM.debug("Omega (deg/s)", Math.toDegrees(omega));
-        telemetryM.debug("fx, fy", String.format("%.3f, %.3f", fx, fy));
-        telemetryM.debug("FlagPassed", FIELD_OR_ROBOT_FLAG);
-        telemetryM.debug("InvertX,Y", String.format("%b,%b", INVERT_FIELD_X, INVERT_FIELD_Y));
+        telemetryM.debug("OmegaCmd (deg/s)", Math.toDegrees(omegaCmd));
+        telemetryM.debug("fxCmd, fyCmd", String.format("%.3f, %.3f", fxCmd, fyCmd));
+        telemetryM.debug("vx, vy (units/s)", String.format("%.3f, %.3f", vx, vy));
+        telemetryM.debug("omegaMeas (deg/s)", Math.toDegrees(omegaMeas));
     }
 
     @Override
@@ -353,6 +408,7 @@ public class FieldCentricAutoHeadingTeleOp extends OpMode {
         double delta = clamp(target - prev, -maxDelta, maxDelta);
         return prev + delta;
     }
+    private static double snapZero(double v, double eps){ return Math.abs(v) < eps ? 0.0 : v; }
 
     // Optional: swap in Pinpoint degrees as the yaw source
     public void usePinpointYawDegrees(DoubleSupplier pinpointYawDegrees){

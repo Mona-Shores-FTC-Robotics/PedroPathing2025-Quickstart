@@ -37,7 +37,7 @@ public class Teleop extends NextFTCOpMode {
         pub = new TelemetryPublisher(logger);
 
         // Configure drive BEFORE components so initialize() sees these settings.
-        robot.drive.setDefaultMode(DriveSubsystem.DriveMode.AUTO_HEADING); // default mode
+        robot.drive.setDefaultMode(DriveSubsystem.DriveMode.NORMAL); // default mode
         robot.drive.setRobotCentric(false); // field-centric
         robot.drive.setPose(0.0, 0.0, 0.0);
 
@@ -51,13 +51,13 @@ public class Teleop extends NextFTCOpMode {
     public void onUpdate() {
         // Drive using “mode holds”: RB=SLOW, LB=NORMAL, else default (AUTO_HEADING)
         double lx = gamepad1.left_stick_x;     // +left
-        double ly = -gamepad1.left_stick_y;    // +forward
+        double ly = gamepad1.left_stick_y;    // +forward
         double rx = -gamepad1.right_stick_x;   // +CCW
 
         boolean rb = gamepad1.right_bumper;    // SLOW (scaled)
         boolean lb = gamepad1.left_bumper;     // NORMAL (no scaling)
 
-        robot.drive.driveWithModeHolds(lx, ly, rx, rb, lb);
+        robot.drive.driveWithModeHolds(lx, -ly, rx, rb, lb);
 
         // Telemetry
         double currentRPM = robot.flywheel.getRpm();
