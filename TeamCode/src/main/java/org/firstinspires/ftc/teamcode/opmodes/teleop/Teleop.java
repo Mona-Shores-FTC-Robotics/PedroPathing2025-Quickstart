@@ -1,6 +1,7 @@
 package org.firstinspires.ftc.teamcode.opmodes.teleop;
 
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
 
 import dev.nextftc.core.components.BindingsComponent;
 import dev.nextftc.core.components.SubsystemComponent;
@@ -19,6 +20,10 @@ import org.firstinspires.ftc.teamcode.util.TelemetryPublisher;
 public class Teleop extends NextFTCOpMode {
 
     private Robot robot;
+    private DcMotorEx lf;
+    private DcMotorEx lr;
+    private DcMotorEx rf;
+    private DcMotorEx rr;
     private TeleopBindings bindings;
     private TelemetryPublisher pub;
     private PsiKitAdapter logger;
@@ -27,6 +32,11 @@ public class Teleop extends NextFTCOpMode {
     public void onInit() {
         // Hardware + app objects
         robot = new Robot(hardwareMap);
+        lf = hardwareMap.get(DcMotorEx.class, "lf");
+        lr = hardwareMap.get(DcMotorEx.class, "lb");
+        rf = hardwareMap.get(DcMotorEx.class, "rf");
+        rr = hardwareMap.get(DcMotorEx.class, "rb");
+
 
         GamepadEx driver   = new GamepadEx(() -> gamepad1);
         GamepadEx operator = new GamepadEx(() -> gamepad2);
@@ -38,7 +48,7 @@ public class Teleop extends NextFTCOpMode {
 
         // Configure drive BEFORE components so initialize() sees these settings.
         robot.drive.setDefaultMode(DriveSubsystem.DriveMode.NORMAL); // default mode
-        robot.drive.setRobotCentric(false); // field-centric
+        robot.drive.setRobotCentric(true); // field-centric
         robot.drive.setPose(0.0, 0.0, 0.0);
 
         // Register components so NextFTC handles initialize()/periodic()/stop()
@@ -88,6 +98,8 @@ public class Teleop extends NextFTCOpMode {
 
         telemetry.addData("flywheel", "%.0f / %.0f rpm",
                 currentRPM, robot.flywheel.getTargetRpm());
+
+        telemetry.addData("motor power", "(%.1f, %.1f, %.1f, %.1f)", lr.getPower(), rr.getPower(), lf.getPower(), rf.getPower());
         telemetry.update();
     }
 
