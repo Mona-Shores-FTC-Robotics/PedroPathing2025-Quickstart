@@ -16,24 +16,29 @@ import com.pedropathing.ivy.commands.Commands;
 import com.pedropathing.ivy.groups.Groups;
 
 /**
- * Close-side "together" auto, variant 2: two gate pushes, two pickup-and-shoot cycles, park.
+ * Close-side "together" auto, variant 3: identical to {@link CloseTogether2Command} except the
+ * first pickup and first gate push are fused into ONE continuous motion.
  *
  * Sequence:
  *   1. Shoot preload          (drive to launchClose1, launch)
- *   2. Pick up artifact set 1
- *   3. Open gate #1           (push openGate, bounded by timeout)
- *   4. Shoot set 1            (return to launchClose2, launch)
- *   5. Pick up artifact set 2
- *   6. Open gate #2           (push openGate2, bounded by timeout)   <-- the added push
- *   7. Shoot set 2            (return to launchClose3, launch)
- *   8. Park                   (drive to nearGate)
+ *   2. Pick up set 1 AND open gate #1 — ONE single cubic Bezier (launchClose1 -> openGate,
+ *      shaped by two control points), no intermediate waypoint and no stop, intaking the
+ *      whole way, bounded by a timeout because the robot drives into the gate.
+ *   3. Shoot set 1            (return to launchClose2, launch)
+ *   4. Pick up artifact set 2
+ *   5. Open gate #2           (stage off the gate, then push, bounded by timeout)
+ *   6. Shoot set 2            (return to launchClose3, launch)
+ *   7. Park                   (drive to nearGate)
  *
- * This is a copy of {@link CloseTogetherCommand} that adds the second gate push and
- * ends after the second set (no set-3 pickup / conditional 4th launch). openGate2 is
- * a separate, independently-tunable waypoint since it's approached from set 2.
+ * Why the difference: in variant 2 the robot decelerated to 0 at artifactsSet1 before pushing
+ * the gate (two separate moves). Here that whole pickup-into-gate is a single Bezier curve with
+ * two control points — no intermediate waypoint to settle at, so the robot sweeps down the
+ * artifact row and curves straight into the gate continuously. Because it's one true cubic, it
+ * matches what the Pedro visualizer renders for a line with two control points: drag the two
+ * controls in Trajectories/CloseTogether3.pp and the robot drives exactly what you see.
  */
 @Configurable
-public class CloseTogether2Command {
+public class CloseTogether3Command {
 
     public static class Config {
         public double maxPathPower = .80;
@@ -44,6 +49,12 @@ public class CloseTogether2Command {
          *  this timeout ends the push so the auto can't hang there. Tune alongside the
          *  openGate waypoints: enough time to reach the gate and shove it open. */
         public double gatePushTimeoutMs = 1500;
+        /** Hard cap (ms) on the FUSED pickup-and-gate sweep (step 2). Unlike variant 2's
+         *  separate pickup (completes naturally) + gate push (timeout), here the whole
+         *  motion ends in the gate so the chain endpoint is never reached and !isBusy()
+         *  never fires. This timeout bounds the entire sweep, so it must cover BOTH the
+         *  pickup drive AND the gate shove — set it longer than gatePushTimeoutMs. */
+        public double pickupAndGateTimeoutMs = 3500;
     }
 
     public static class Waypoints {
@@ -56,28 +67,35 @@ public class CloseTogether2Command {
         public double launchClose1Y = 107;
         public double launchClose1Heading = 134;
 
-        // ArtifactsSet1 — pulled toward the wall (lower X) so the intake reaches the
-        // wall-side artifact instead of clipping the row. Control shares the endpoint X
-        // so the robot translates over to the wall line at the TOP, then comes straight
-        // down in Y (rather than cutting the row diagonally and missing the wall one).
-        public double artifactsSet1X = 21;
-        public double artifactsSet1Y = 82;
-        public double artifactsSet1Heading = 270.0;
+        // Fused pickup-and-gate (step 2) — ONE cubic Bezier from launchClose1 straight into
+        // the gate, shaped by TWO control points so the robot sweeps down the artifact row
+        // (hugging the wall line near x=21) and curves into the gate with NO intermediate
+        // waypoint, so there is no settle/stop and no curvature kink. These two controls are
+        // exactly what you drag in the Pedro visualizer (Trajectories/CloseTogether3.pp) — the
+        // robot drives the same cubic 1:1.
+        //   control0 — high/left: bows the curve out to the wall at the top of the row
+        //   control1 — right/low: shapes the back half before it cuts left into the gate
+        // (Values tuned by hand in the Pedro visualizer; keep this in sync with CloseTogether3.pp.)
+        public double pickupGateControl0X = 10.5;
+        public double pickupGateControl0Y = 122.5;
+        public double pickupGateControl1X = 38;
+        public double pickupGateControl1Y = 73.5;
 
-        public double artifactsSet1Control0X = 20;
-        public double artifactsSet1Control0Y = 120;
-
-        // OpenGate #1 — control sits midway between artifactsSet1 and the gate, on the line.
+        // OpenGate #1 — endpoint of the fused move (the gate itself).
         public double openGateX = 11;
-        public double openGateY = 80;
+        public double openGateY = 78;
         public double openGateHeading = 270;
-        public double openGateControlX = 20;
-        public double openGateControlY = 80;
 
         // LaunchClose2
         public double launchClose2X = 36;
         public double launchClose2Y = 107;
         public double launchClose2Heading = 134;
+
+        // Control for the return-from-gate move (openGate -> launchClose2). Sits just off the
+        // gate so the robot peels away cleanly before swinging back to the launch spot rather
+        // than dragging straight off the wall.
+        public double launchClose2Control0X = 22.7;
+        public double launchClose2Control0Y = 75.2;
 
         // ArtifactsSet2
         public double artifactsSet2X = 21;
@@ -95,20 +113,16 @@ public class CloseTogether2Command {
         public double openGate2ControlX = 17;
         public double openGate2ControlY = 78;
 
-        // Gate #2 staging — sits ~5 inches off the gate toward the field (gate is at x=11,
-        // this is x=16). The robot routes through here BOTH ways: on the way in it drives
-        // here first, THEN pushes straight left into the gate (so it stops backing into it);
-        // on the way out it backs off to here off the wall, THEN rotates to launch (so it
-        // stops turning into it). Move this point to set how far / which way it goes
-        // before and after the push.
-        public double gate2StageX = 16;
-        public double gate2StageY = 78;
-        public double gate2StageHeading = 270;
-
         // LaunchClose3
         public double launchClose3X = 36;
         public double launchClose3Y = 107;
-        public double launchClose3Heading = 140;
+        public double launchClose3Heading = 134;
+
+        // Control for the gate-#2 exit (openGate2 -> launchClose3). Same role/value as
+        // launchClose2Control0 — peels the robot off the gate cleanly. (openGate2/launchClose3
+        // share coordinates with openGate/launchClose2, so this mirrors the gate-#1 exit.)
+        public double launchClose3Control0X = 22.7;
+        public double launchClose3Control0Y = 75.2;
 
         // NearGate (park)
         public double nearGateX = 35;
@@ -122,7 +136,7 @@ public class CloseTogether2Command {
     public static Config config = new Config();
     public static Waypoints waypoints = new Waypoints();
 
-    private CloseTogether2Command() {}
+    private CloseTogether3Command() {}
 
     /**
      * Gets the default start pose from waypoints (before alliance mirroring).
@@ -187,38 +201,43 @@ public class CloseTogether2Command {
                 ),
                 ModeAwareLaunchCommand.create(robot.launcher, robot.intake, false),
 
-                // 2. Pick up artifact set 1
-                Groups.deadline(
-                        new FollowPathBuilder(robot, alliance)
-                                .from(launchClose1())
-                                .to(artifactsSet1())
-                                .withControl(artifactsSet1Control0())
-                                .withConstantHeading(270)
-                                .build(config.maxPathPower),
-                        robot.intake.autoSmartIntakeCmd()
-                ),
-
-                // 3. Open gate #1 — bounded by a timeout so the gate-push can't hang the auto.
+                // 2. Pick up artifact set 1 AND open gate #1 in ONE continuous curve. A single
+                //    cubic Bezier from launchClose1 straight into openGate, shaped by TWO control
+                //    points so it sweeps down the artifact row and curves into the gate with NO
+                //    intermediate waypoint — so there's no settle/stop and no curvature kink. It's
+                //    a true cubic (matches what the Pedro visualizer renders for a 2-control line),
+                //    so you can drag the controls in the visualizer and the robot drives what you
+                //    see. See Trajectories/CloseTogether3.pp.
+                //
+                //    Intake runs the whole sweep (deadline). The move is bounded by a timeout
+                //    (race) because it ends by driving into the gate, so the path endpoint is
+                //    never reached and the follow's !isBusy() never fires.
                 Groups.race(
-                        new FollowPathBuilder(robot, alliance)
-                                .from(artifactsSet1())
-                                .to(openGate())
-                                .withControl(openGateControl())
-                                .withConstantHeading(270)
-                                .build(config.maxPathPower),
-                        Commands.waitMs(config.gatePushTimeoutMs)
+                        Groups.deadline(
+                                new FollowPathBuilder(robot, alliance)
+                                        .from(launchClose1())
+                                        .to(openGate())
+                                        .withControl(pickupGateControl0())
+                                        .withControl(pickupGateControl1())
+                                        .withConstantHeading(270)
+                                        .build(config.maxPathPower),
+                                robot.intake.autoSmartIntakeCmd()
+                        ),
+                        Commands.waitMs(config.pickupAndGateTimeoutMs)
                 ),
                 Commands.waitMs(config.secondsOpeningGate * 1000.0), // dwell so the gate opens
 
-                // 4. Shoot set 1 (return to launch; constant 270 then turn to launch heading)
+                // 3. Shoot set 1 (return to launch; constant 270 then turn to launch heading).
+                //    Control point peels the robot off the gate cleanly before swinging back.
                 new FollowPathBuilder(robot, alliance)
                         .from(openGate())
                         .to(launchClose2())
+                        .withControl(launchClose2Control0())
                         .withPiecewiseConstantThenLinear(270, 0.2, waypoints.launchClose2Heading)
                         .build(config.maxPathPower),
                 ModeAwareLaunchCommand.create(robot.launcher, robot.intake, false),
 
-                // 5. Pick up artifact set 2
+                // 4. Pick up artifact set 2
                 Groups.deadline(
                         new FollowPathBuilder(robot, alliance)
                                 .from(launchClose2())
@@ -229,41 +248,34 @@ public class CloseTogether2Command {
                         robot.intake.autoSmartIntakeCmd()
                 ),
 
-                // 6. Open gate #2 — stage off the gate first, THEN push straight left into it.
-                //    Drive to the staging point (forward, off the wall), then push left into
-                //    the gate. The push is bounded by the timeout so it can't hang. Routing
-                //    through the stage stops the robot backing straight into the gate.
-                new FollowPathBuilder(robot, alliance)
-                        .from(artifactsSet2())
-                        .to(gate2Stage())
-                        .withConstantHeading(270)
-                        .build(config.maxPathPower),
+                // 5. Open gate #2 — single curve from the pickup straight into the gate, mirroring
+                //    gate #1's entry (no stage-in). The control point shapes the approach so the
+                //    robot curves into the gate instead of backing into it. Bounded by a timeout
+                //    because the move ends by driving into the gate, so the path endpoint is never
+                //    reached and the follow's !isBusy() never fires.
                 Groups.race(
                         new FollowPathBuilder(robot, alliance)
-                                .from(gate2Stage())
+                                .from(artifactsSet2())
                                 .to(openGate2())
+                                .withControl(openGate2Control())
                                 .withConstantHeading(270)
                                 .build(config.maxPathPower),
                         Commands.waitMs(config.gatePushTimeoutMs)
                 ),
                 Commands.waitMs(config.secondsOpeningGate * 1000.0), // dwell so the gate opens
 
-                // 7. Shoot set 2 — back off the gate to the staging point FIRST (constant
-                //    heading, pure translation off the wall), THEN rotate and return to
-                //    launch. Without the back-off the robot turns into the gate.
+                // 6. Shoot set 2 — single curve off the gate back to launch, mirroring gate #1's
+                //    exit. The control point peels the robot off the gate cleanly (no need for
+                //    the gate2Stage back-off); constant 270 then turn to launch heading.
                 new FollowPathBuilder(robot, alliance)
                         .from(openGate2())
-                        .to(gate2Stage())
-                        .withConstantHeading(270)
-                        .build(config.maxPathPower),
-                new FollowPathBuilder(robot, alliance)
-                        .from(gate2Stage())
                         .to(launchClose3())
-                        .withLinearHeadingCompletion(config.endTimeForLinearHeadingInterpolation)
+                        .withControl(launchClose3Control0())
+                        .withPiecewiseConstantThenLinear(270, 0.2, waypoints.launchClose3Heading)
                         .build(config.maxPathPower),
                 ModeAwareLaunchCommand.create(robot.launcher, robot.intake, false),
 
-                // 8. Park
+                // 7. Park
                 new FollowPathBuilder(robot, alliance)
                         .from(launchClose3())
                         .to(nearGate())
@@ -281,24 +293,24 @@ public class CloseTogether2Command {
         return new Pose(waypoints.launchClose1X, waypoints.launchClose1Y, Math.toRadians(waypoints.launchClose1Heading));
     }
 
-    private static Pose artifactsSet1() {
-        return new Pose(waypoints.artifactsSet1X, waypoints.artifactsSet1Y, Math.toRadians(waypoints.artifactsSet1Heading));
+    private static Pose pickupGateControl0() {
+        return new Pose(waypoints.pickupGateControl0X, waypoints.pickupGateControl0Y, 0);
     }
 
-    private static Pose artifactsSet1Control0() {
-        return new Pose(waypoints.artifactsSet1Control0X, waypoints.artifactsSet1Control0Y, 0);
+    private static Pose pickupGateControl1() {
+        return new Pose(waypoints.pickupGateControl1X, waypoints.pickupGateControl1Y, 0);
     }
 
     private static Pose openGate() {
         return new Pose(waypoints.openGateX, waypoints.openGateY, Math.toRadians(waypoints.openGateHeading));
     }
 
-    private static Pose openGateControl() {
-        return new Pose(waypoints.openGateControlX, waypoints.openGateControlY, 0);
-    }
-
     private static Pose launchClose2() {
         return new Pose(waypoints.launchClose2X, waypoints.launchClose2Y, Math.toRadians(waypoints.launchClose2Heading));
+    }
+
+    private static Pose launchClose2Control0() {
+        return new Pose(waypoints.launchClose2Control0X, waypoints.launchClose2Control0Y, 0);
     }
 
     private static Pose artifactsSet2() {
@@ -317,12 +329,12 @@ public class CloseTogether2Command {
         return new Pose(waypoints.openGate2ControlX, waypoints.openGate2ControlY, 0);
     }
 
-    private static Pose gate2Stage() {
-        return new Pose(waypoints.gate2StageX, waypoints.gate2StageY, Math.toRadians(waypoints.gate2StageHeading));
-    }
-
     private static Pose launchClose3() {
         return new Pose(waypoints.launchClose3X, waypoints.launchClose3Y, Math.toRadians(waypoints.launchClose3Heading));
+    }
+
+    private static Pose launchClose3Control0() {
+        return new Pose(waypoints.launchClose3Control0X, waypoints.launchClose3Control0Y, 0);
     }
 
     private static Pose nearGate() {

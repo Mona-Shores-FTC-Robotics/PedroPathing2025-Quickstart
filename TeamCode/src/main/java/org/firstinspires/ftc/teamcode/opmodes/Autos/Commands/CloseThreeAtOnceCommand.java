@@ -57,6 +57,7 @@ public class CloseThreeAtOnceCommand {
         public double artifactsSet1Y = 83.8;
         public double artifactsSet1Heading = 270.0;
 
+
         // Control point for segment: ArtifactsSet3
         public double artifactsSet1Control0X = 20;
         public double artifactsSet1Control0Y = 120;

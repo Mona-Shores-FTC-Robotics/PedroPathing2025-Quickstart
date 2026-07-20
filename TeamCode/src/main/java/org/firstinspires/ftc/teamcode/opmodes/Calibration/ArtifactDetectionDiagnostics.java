@@ -2,6 +2,7 @@ package org.firstinspires.ftc.teamcode.opmodes.Calibration;
 
 import com.acmerobotics.dashboard.FtcDashboard;
 import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.util.ElapsedTime;
@@ -27,6 +28,7 @@ import java.util.Locale;
  * - X: Clear history and reset
  * - Left Stick Y: Scroll through historical samples
  */
+@Disabled
 @TeleOp(name = "Artifact Detection Diagnostics", group = "Tuning")
 public class ArtifactDetectionDiagnostics extends LinearOpMode {
 

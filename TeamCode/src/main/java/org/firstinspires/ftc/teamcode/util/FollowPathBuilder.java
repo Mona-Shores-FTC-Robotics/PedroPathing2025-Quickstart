@@ -304,8 +304,14 @@ public class FollowPathBuilder {
     }
 
     /**
-     * Adds one logical segment to the PathBuilder, handling the multi-control-point
-     * Bezier-chain decomposition the same way the original single-segment build did.
+     * Adds one logical segment to the PathBuilder as a SINGLE Bezier whose order matches the
+     * control-point count: 0 controls -> straight line, 1 control -> quadratic, 2 controls ->
+     * cubic, N controls -> order-(N+1) Bezier.
+     *
+     * <p>This matches exactly what the Pedro visualizer renders for a line with that many
+     * control points, so a path tuned by dragging control points in the visualizer drives
+     * 1:1 on the robot. (Pose implements FuturePose, so Pedro's {@code BezierCurve(List<Pose>)}
+     * ctor accepts our start/control/end list directly — no decomposition into sub-curves.)
      */
     private static void addSegmentToBuilder(PathBuilder builder, Pose segStart, Pose segEnd, List<Pose> controls) {
         if (controls.isEmpty()) {
@@ -316,21 +322,7 @@ public class FollowPathBuilder {
         pts.add(segStart);
         pts.addAll(controls);
         pts.add(segEnd);
-        Pose segmentStart = segStart;
-        for (int i = 0; i < pts.size() - 1; i++) {
-            Pose control = pts.get(i + 1);
-            Pose segmentEnd = (i + 2 < pts.size()) ? pts.get(i + 2) : segEnd;
-            // Avoid degenerate curves when the last control equals the end point
-            if (control.equals(segmentEnd)) {
-                builder.addPath(new BezierLine(segmentStart, segmentEnd));
-            } else {
-                builder.addPath(new BezierCurve(segmentStart, control, segmentEnd));
-            }
-            segmentStart = segmentEnd;
-            if (segmentEnd == segEnd) {
-                break;
-            }
-        }
+        builder.addPath(new BezierCurve(pts));
     }
 
     // ---------------------------

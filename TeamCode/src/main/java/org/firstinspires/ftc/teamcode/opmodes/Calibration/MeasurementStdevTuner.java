@@ -7,6 +7,7 @@ import com.bylazar.configurables.annotations.Configurable;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.ivy.Scheduler;
 import com.qualcomm.hardware.lynx.LynxModule;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 import com.qualcomm.robotcore.eventloop.opmode.OpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 
@@ -45,6 +46,7 @@ import java.util.List;
  * <p>Heading residual is wrapped to [-180, 180] so a measurement at 179° vs.
  * truth at -179° produces a 2° error, not 358°.
  */
+@Disabled
 @TeleOp(name = "Measurement Stdev Tuner", group = "Calibration")
 @Configurable
 public class MeasurementStdevTuner extends OpMode {

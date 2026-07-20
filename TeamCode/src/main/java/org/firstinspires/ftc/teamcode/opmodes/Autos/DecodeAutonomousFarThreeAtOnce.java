@@ -3,6 +3,7 @@ package org.firstinspires.ftc.teamcode.opmodes.Autos;
 import com.pedropathing.geometry.Pose;
 import com.pedropathing.ivy.Command;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.Disabled;
 
 import org.firstinspires.ftc.teamcode.opmodes.Autos.Commands.FarThreeAtOnceCommand;
 
